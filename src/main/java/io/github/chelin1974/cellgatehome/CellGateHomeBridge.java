@@ -4,7 +4,9 @@ import io.github.chelin1974.cellgatehome.cellgate.CellGateClient;
 import io.github.chelin1974.cellgatehome.cellgate.Watchman;
 import io.github.chelin1974.cellgatehome.homekit.AccessoryIds;
 import io.github.chelin1974.cellgatehome.homekit.FileAuthInfo;
+import io.github.chelin1974.cellgatehome.homekit.DoorbellWatcher;
 import io.github.chelin1974.cellgatehome.homekit.GateAccessory;
+import io.github.chelin1974.cellgatehome.homekit.GateDoorbell;
 import io.github.chelin1974.cellgatehome.homekit.HomeKitNames;
 import io.github.chelin1974.cellgatehome.homekit.LayoutVersion;
 import io.github.chelin1974.cellgatehome.homekit.NetworkAddresses;
@@ -43,6 +45,8 @@ public final class CellGateHomeBridge implements AutoCloseable {
 
   private static final Logger log = LoggerFactory.getLogger(CellGateHomeBridge.class);
   private static final int FIRST_ACCESSORY_ID = 2;
+  /** How many recent log entries to scan for doorbell events on each poll. */
+  private static final int DOORBELL_ACTIVITY_COUNT = 20;
 
   private final CellGateConfig config;
   private final CellGateClient client;
@@ -61,6 +65,7 @@ public final class CellGateHomeBridge implements AutoCloseable {
   private HomekitRoot bridge;
   private DashboardServer dashboard;
   private OtlpExporter exporter;
+  private DoorbellWatcher doorbellWatcher;
   private volatile boolean running;
 
   /** A gate accessory tied back to the unit and port it drives, so polling can update it. */
@@ -100,6 +105,7 @@ public final class CellGateHomeBridge implements AutoCloseable {
     AccessoryIds ids = AccessoryIds.load(accessoryIdsFile());
     List<HomekitAccessory> accessories = new ArrayList<>();
     List<DashboardModel.Gate> dashboardGates = new ArrayList<>();
+    List<DoorbellWatcher.Bell> bells = new ArrayList<>();
     List<String> takenNames = new ArrayList<>();
 
     for (GateEntry entry : gates) {
@@ -116,6 +122,22 @@ public final class CellGateHomeBridge implements AutoCloseable {
       gateHandles.add(new GateHandle(accessory, entry.unit().id(), entry.gate().id(),
           entry.statusPortId()));
       dashboardGates.add(new Gate("gate-" + entry.gate().id(), display, entry.unit().location(), accessory));
+
+      if (config.doorbell()) {
+        String bellName = HomeKitNames.unique(display + " Doorbell", takenNames);
+        takenNames.add(bellName);
+        GateDoorbell doorbell = new GateDoorbell(
+            ids.idFor("doorbell:" + entry.unit().id() + ":" + entry.gate().id()),
+            bellName,
+            entry.unit().serial() == null ? null : entry.unit().serial() + "-doorbell",
+            entry.unit().hardwareModel(),
+            scheduler);
+        accessories.add(doorbell);
+        bells.add(new DoorbellWatcher.Bell(entry.unit().location(), doorbell));
+      }
+    }
+    if (config.doorbell() && !bells.isEmpty()) {
+      doorbellWatcher = new DoorbellWatcher(bells, config.doorbellRingEvents());
     }
 
     accessories.forEach(bridge::addAccessory);
@@ -124,8 +146,11 @@ public final class CellGateHomeBridge implements AutoCloseable {
 
     bridge.start();
     running = true;
-    log.info("HomeKit bridge \"{}\" advertised at {}:{} with {} gate(s)",
+    log.info("HomeKit bridge \"{}\" advertised at {}:{} with {} accessory/ies",
         config.bridgeName(), address.getHostAddress(), config.port(), accessories.size());
+    if (doorbellWatcher != null) {
+      log.info("doorbell on: Home will notify when the gate logs {}", config.doorbellRingEvents());
+    }
 
     if (!authInfo.hasUser()) {
       log.info("");
@@ -180,6 +205,22 @@ public final class CellGateHomeBridge implements AutoCloseable {
     }
     for (GateHandle h : gateHandles) {
       h.accessory().updateOpen(openStateFor(h));
+    }
+    ringDoorbells();
+  }
+
+  /** Reads recent activity and rings a doorbell for each new "someone's at the gate" entry. */
+  private void ringDoorbells() {
+    if (doorbellWatcher == null) {
+      return;
+    }
+    try {
+      int fired = doorbellWatcher.onActivity(client.activity(DOORBELL_ACTIVITY_COUNT));
+      if (fired > 0) {
+        log.debug("rang the doorbell {} time(s) from new gate activity", fired);
+      }
+    } catch (RuntimeException e) {
+      log.warn("could not read the activity log for the doorbell: {}", e.getMessage());
     }
   }
 

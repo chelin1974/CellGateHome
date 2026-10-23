@@ -41,6 +41,15 @@ public final class CellGateConfig {
   public static final Duration MIN_METRICS_INTERVAL = Duration.ofSeconds(10);
   public static final String PROMETHEUS_OTLP_PATH = "/api/v1/otlp/v1/metrics";
 
+  /**
+   * Which activity-log entries count as "someone is at the gate" and ring the HomeKit doorbell.
+   * Matched as case-insensitive substrings of each log entry's description. The default is the
+   * camera-snapshot the gate takes whenever someone interacts with it ("Internal Camera Response
+   * Picture"); that fires once per visit and, unlike a plain "Gate Opened", does not fire when the
+   * owner opens the gate remotely from the app.
+   */
+  public static final List<String> DEFAULT_DOORBELL_RING_EVENTS = List.of("Response Picture");
+
   public static final class ConfigException extends RuntimeException {
     public ConfigException(String message) {
       super(message);
@@ -64,6 +73,8 @@ public final class CellGateConfig {
   private final URI otlpEndpoint;
   private final Duration metricsInterval;
   private final String prometheusUrl;
+  private final boolean doorbell;
+  private final List<String> doorbellRingEvents;
 
   private CellGateConfig(Raw raw, Path directory) {
     this.email = trimmed(raw.email);
@@ -104,6 +115,17 @@ public final class CellGateConfig {
     this.metricsInterval = raw.metricsIntervalSeconds == null
         ? DEFAULT_METRICS_INTERVAL
         : Duration.ofSeconds(Math.max(MIN_METRICS_INTERVAL.toSeconds(), raw.metricsIntervalSeconds));
+
+    this.doorbell = raw.doorbell == null || raw.doorbell;
+    List<String> ring = new ArrayList<>();
+    if (raw.doorbellRingEvents != null) {
+      for (String e : raw.doorbellRingEvents) {
+        if (e != null && !e.isBlank()) {
+          ring.add(e.trim());
+        }
+      }
+    }
+    this.doorbellRingEvents = ring.isEmpty() ? DEFAULT_DOORBELL_RING_EVENTS : List.copyOf(ring);
   }
 
   public String email() {
@@ -154,6 +176,16 @@ public final class CellGateConfig {
     return metricsInterval;
   }
 
+  /** Whether to publish a HomeKit doorbell that rings on gate activity. */
+  public boolean doorbell() {
+    return doorbell;
+  }
+
+  /** Case-insensitive substrings of a log entry's description that ring the doorbell. */
+  public List<String> doorbellRingEvents() {
+    return doorbellRingEvents;
+  }
+
   public java.util.Optional<URI> prometheusUri() {
     return prometheusUrl == null ? java.util.Optional.empty()
         : java.util.Optional.of(httpUri("prometheusUrl", prometheusUrl));
@@ -197,6 +229,8 @@ public final class CellGateConfig {
     public String prometheusUrl;
     public String otlpEndpoint;
     public Integer metricsIntervalSeconds;
+    public Boolean doorbell;
+    public List<String> doorbellRingEvents;
   }
 
   private static Duration atLeast(Integer seconds, int fallback, Duration floor) {

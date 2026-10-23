@@ -11,5 +11,10 @@
   "dashboardPasscode": "",
 
   "prometheusUrl": "",
-  "pollIntervalSeconds": 20
+  "pollIntervalSeconds": 20,
+
+  "_doorbell": "Publish a HomeKit doorbell that rings (a 'Front gate' notification on every phone) when someone is at the gate. Set false to turn it off.",
+  "doorbell": true,
+  "_doorbellRingEvents": "Which activity-log entries ring it, matched as case-insensitive substrings of the entry's description. The default camera snapshot fires once per visit and not when you open the gate remotely. If your gate logs a distinct call-button entry, add its text here.",
+  "doorbellRingEvents": ["Response Picture"]
 }

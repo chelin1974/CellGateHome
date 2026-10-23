@@ -30,10 +30,25 @@ command. It speaks the HomeKit Accessory Protocol directly via
 | In Home | What it is |
 | --- | --- |
 | A **gate** accessory (a garage-door tile, the closest HomeKit type) | Open / Closed from the unit's gate-status sensor; tap to open. Works with Siri and automations. |
+| A **doorbell** per gate | Rings when someone is at the gate, so Home pushes a "Front gate" notification to every phone. On by default; see [The doorbell](#the-doorbell). |
 
 The gate only **opens** on command — CellGate decides when it closes (its own hold timer, or a
 close from the keypad or app), so a "close" from Home is ignored and the tile snaps back. A
 **camera** tile is planned (stage 2); for now the camera lives on the dashboard.
+
+### The doorbell
+
+CellGate has no real doorbell button in its data, but every time someone uses the gate the unit
+takes a camera snapshot and writes it to the activity log (`Internal Camera Response Picture`). The
+bridge watches that log and, on each new snapshot, rings a HomeKit **Doorbell** — which is what
+makes Apple Home send the notification. It fires once per visit, and **not** when you open the gate
+remotely from the app (that leaves no snapshot), so it means "someone is physically at the gate."
+
+- Turn it off with `"doorbell": false`.
+- Change what rings it with `doorbellRingEvents` — a list of case-insensitive substrings matched
+  against each log entry's description (default `["Response Picture"]`). If your gate logs a
+  distinct call-button entry, add its text here; the bridge logs each entry it rings on at `debug`.
+- A restart never replays history: the first poll only records what's already there as a baseline.
 
 ## Requirements
 
@@ -195,6 +210,8 @@ changing it.
 | `port` | `51829` | HomeKit port. Different from SpanHome's and DaikinHome's, so all three can run on one machine. |
 | `dashboardPort` | `8090` | Gate Board port. `0` turns it off. |
 | `dashboardPasscode` | none | Household passcode for opening the gate and taking pictures from the dashboard. |
+| `doorbell` | `true` | Publish a HomeKit doorbell that rings on gate activity. See [The doorbell](#the-doorbell). |
+| `doorbellRingEvents` | `["Response Picture"]` | Case-insensitive substrings of a log entry's description that ring the doorbell. |
 | `prometheusUrl` | none | Prometheus 3 base URL. Turns on metrics export. |
 | `otlpEndpoint` | `<prometheusUrl>/api/v1/otlp/v1/metrics` | Where OTLP metrics go, if not straight to Prometheus. |
 | `metricsIntervalSeconds` | `60` | Seconds between metric pushes. |
@@ -231,7 +248,12 @@ your own account's devices, with your own credentials.
 ## Known gaps
 
 - **Camera is on the dashboard, not yet in Home.** HAP-Java has no camera support, and the
-  Watchman only takes stills; a HomeKit camera tile (snapshot-based, with ffmpeg) is stage 2.
+  Watchman only takes stills; a HomeKit camera tile (snapshot-based, with ffmpeg) is stage 2. The
+  doorbell is the stand-in: Home notifies you when someone's at the gate even though the picture
+  itself still lives on the dashboard.
+- **The doorbell infers "someone's here" from the camera snapshot** the gate logs on each use,
+  because CellGate exposes no real call-button event. If your gate does log one, name it in
+  `doorbellRingEvents`.
 - **Open only.** The gate's own timer or the keypad/app closes it.
 - **State needs a gate-status sensor.** With one wired (this unit has it), Home shows the real
   Open/Closed state; without one, the tile shows Closed and only reacts to your own opens.
@@ -249,6 +271,8 @@ mvn test
 | `cellgate/Watchman` | Model of a unit and its ports, parsed from `getModules`. **Pure.** |
 | `cellgate/CellGateClient` | Signs in and makes the portal's calls |
 | `homekit/GateAccessory` | A gate as a HomeKit garage-door accessory |
+| `homekit/GateDoorbell` | A gate's HomeKit doorbell (programmable-switch); `ring()` fires the Home notification |
+| `homekit/DoorbellWatcher` | Turns new activity-log entries into doorbell rings (priming, matching, de-dup). **Pure.** |
 | `web/DashboardServer` | The Gate Board page, its API, passcode and home-network checks |
 | `web/DashboardModel` | What the dashboard shows and does |
 | `metrics/CellGateMetrics` | Gate state to an OTLP metrics request (pure) |
