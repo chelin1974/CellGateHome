@@ -1,0 +1,35 @@
+# systemd unit for the CellGate HomeKit bridge. See "Linux (systemd)" in the README.
+#
+#   sudo cp cellgate-home.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now cellgate-home
+#   journalctl -u cellgate-home -f   # the setup code and dashboard address are printed at startup
+#
+# Expects the jar and cellgate.config.json in /opt/cellgate-home, owned by the cellgate user.
+# Adjust User, WorkingDirectory and the paths if yours differ.
+
+[Unit]
+Description=CellGate HomeKit bridge
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=cellgate
+WorkingDirectory=/opt/cellgate-home
+ExecStart=/usr/bin/java -jar /opt/cellgate-home/cellgate-home.jar --config /opt/cellgate-home/cellgate.config.json
+Restart=on-failure
+RestartSec=15
+
+# The config holds your CellGate password and the state file holds the HomeKit setup code,
+# so keep everything the bridge writes readable only by this user.
+UMask=0077
+
+# HomeKit needs mDNS on the LAN, so no network namespacing here.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+
+[Install]
+WantedBy=multi-user.target

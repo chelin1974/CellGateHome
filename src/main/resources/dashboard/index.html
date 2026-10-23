@@ -1,0 +1,187 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Gate Board</title>
+<style>
+:root {
+  --bg: #eef1f4; --surface: #fff; --ink: #1a2129; --muted: #5d6b7a; --rule: #cfd7e0;
+  --accent: #2f6f4f; --accent-ink: #fff; --open: #c97a10; --closed: #3f7d5a; --warn: #b4420f;
+  --display: "Barlow Semi Condensed", "Arial Narrow", Arial, sans-serif;
+  --mono: ui-monospace, "SF Mono", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #11161c; --surface: #1a2129; --ink: #e6ebf0; --muted: #94a2b1; --rule: #2e3945;
+    --accent: #3fbf86; --accent-ink: #06231a; --open: #e6a23c; --closed: #4fb587;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--ink); font-family: system-ui, -apple-system, sans-serif;
+  padding: max(16px, env(safe-area-inset-top)) 16px calc(24px + env(safe-area-inset-bottom)); }
+.wrap { max-width: 760px; margin: 0 auto; }
+header { display: flex; align-items: baseline; justify-content: space-between; flex-wrap: wrap; gap: 8px; }
+h1 { font-family: var(--display); font-weight: 700; font-size: 30px; margin: 0; }
+.label { font-family: var(--display); font-size: 13px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+.status { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; color: var(--muted); }
+.status::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
+.status.live::before { background: var(--closed); } .status.down::before { background: var(--warn); }
+section { background: var(--surface); border: 1px solid var(--rule); border-radius: 14px; padding: 16px; margin-top: 16px; }
+.gate { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.gate h2 { font-family: var(--display); font-weight: 700; font-size: 22px; margin: 0; }
+.gate .where { font-size: 13px; color: var(--muted); }
+.pill { font-family: var(--display); font-weight: 700; font-size: 13px; letter-spacing: .04em; text-transform: uppercase;
+  padding: 4px 10px; border-radius: 999px; border: 1px solid var(--rule); }
+.pill.open { color: var(--open); border-color: var(--open); }
+.pill.closed { color: var(--closed); border-color: var(--closed); }
+button { font-family: var(--display); font-weight: 600; font-size: 16px; border: 0; border-radius: 10px;
+  padding: 12px 20px; background: var(--accent); color: var(--accent-ink); cursor: pointer; }
+button.ghost { background: transparent; color: var(--ink); border: 1px solid var(--rule); }
+button:disabled { opacity: .5; cursor: default; }
+.cam { display: grid; gap: 10px; }
+.cam img { width: 100%; max-height: 420px; object-fit: contain; border-radius: 10px; background: var(--bg); display: block; }
+.cam .when { font-size: 12px; color: var(--muted); }
+.row { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+h3 { font-family: var(--display); font-weight: 700; font-size: 15px; letter-spacing: .03em; text-transform: uppercase;
+  color: var(--muted); margin: 0 0 10px; }
+table { width: 100%; border-collapse: collapse; font-size: 14px; }
+td { padding: 8px 6px; border-bottom: 1px solid var(--rule); vertical-align: top; }
+td.when { color: var(--muted); white-space: nowrap; font-variant-numeric: tabular-nums; }
+tr:last-child td { border-bottom: 0; }
+.bad { color: var(--warn); }
+.note { font-size: 13px; color: var(--muted); margin: 8px 0 0; }
+.sheet-back { position: fixed; inset: 0; background: rgb(0 0 0 / .45); display: grid; place-items: center; z-index: 10; padding: 16px; }
+.sheet { background: var(--surface); border-radius: 14px; padding: 20px; width: min(360px, 100%); display: grid; gap: 12px; }
+.sheet input { font: inherit; font-size: 18px; padding: 10px 12px; border-radius: 8px; border: 1px solid var(--rule);
+  background: var(--bg); color: var(--ink); letter-spacing: .1em; }
+.sheet .actions { display: flex; gap: 8px; justify-content: flex-end; }
+.toast { position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(18px + env(safe-area-inset-bottom));
+  background: var(--ink); color: var(--bg); padding: 10px 16px; border-radius: 8px; font-size: 14px; box-shadow: 0 6px 24px rgb(0 0 0 / .25); }
+[hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div><div class="label">CellGate</div><h1>Gate Board</h1></div>
+    <span class="status" id="status">Connecting…</span>
+  </header>
+
+  <section id="gates"></section>
+
+  <section>
+    <div class="row"><h3 style="margin:0">Camera</h3><button class="ghost" id="snap" type="button">Take picture</button></div>
+    <div class="cam" id="cameras"><p class="note">Loading…</p></div>
+  </section>
+
+  <section>
+    <h3>Recent activity</h3>
+    <table><tbody id="activity"><tr><td class="note">Loading…</td></tr></tbody></table>
+  </section>
+
+  <p class="note">On your home network only. Opening the gate needs the household passcode.</p>
+</div>
+
+<div class="sheet-back" id="sheetBack" hidden>
+  <form class="sheet" id="sheet" autocomplete="off">
+    <h3 id="sheetWhat">Enter the household passcode.</h3>
+    <input id="passcode" type="password" inputmode="text" autocomplete="current-password" aria-label="Passcode" required>
+    <span class="bad" id="sheetErr" role="alert" style="min-height:1em;font-size:13px"></span>
+    <div class="actions"><button type="button" class="ghost" id="cancel">Cancel</button><button type="submit">OK</button></div>
+  </form>
+</div>
+<div class="toast" id="toast" role="status" hidden></div>
+
+<script>
+"use strict";
+const $ = id => document.getElementById(id);
+const esc = s => String(s == null ? "" : s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+let state = null, lastOk = 0, pending = null, switching = false;
+
+function pass() { try { return localStorage.getItem("cellgate-passcode") || ""; } catch { return ""; } }
+function savePass(v) { try { v ? localStorage.setItem("cellgate-passcode", v) : localStorage.removeItem("cellgate-passcode"); } catch {} }
+function toast(t) { const el = $("toast"); el.textContent = t; el.hidden = false; clearTimeout(toast.t); toast.t = setTimeout(() => el.hidden = true, 3500); }
+
+async function poll() {
+  try { state = await (await fetch("/api/state", {cache:"no-store"})).json(); lastOk = Date.now(); switching = state.switching; }
+  catch { /* shown below */ }
+  render();
+}
+function render() {
+  const s = $("status"), age = (Date.now() - lastOk) / 1000;
+  if (!state || age > 15) { s.className = "status down"; s.textContent = "Can't reach the bridge"; }
+  else { s.className = "status live"; s.textContent = switching ? "Live" : "View only"; }
+  if (!state) return;
+  $("gates").innerHTML = state.gates.map(g => {
+    const st = g.state === "open" ? '<span class="pill open">Open</span>'
+      : g.state === "closed" ? '<span class="pill closed">Closed</span>' : '<span class="pill">Unknown</span>';
+    return `<div class="gate"><div><h2>${esc(g.name)}</h2>${g.location ? `<div class="where">${esc(g.location)}</div>` : ""}</div>
+      <div style="display:flex;gap:12px;align-items:center">${st}<button type="button" data-open="${esc(g.id)}">Open</button></div></div>`;
+  }).join("") || '<p class="note">No gates.</p>';
+  $("gates").querySelectorAll("[data-open]").forEach(b => b.onclick = () => openGate(b.dataset.open, b));
+}
+
+async function openGate(id, btn) {
+  if (!switching) { toast("Opening from this page is off. Set dashboardPasscode in the bridge's config."); return; }
+  const code = pass();
+  if (!code) { ask("Enter the passcode to open the gate.", () => openGate(id, btn)); return; }
+  btn.disabled = true;
+  try {
+    const r = await fetch(`/api/gates/${encodeURIComponent(id)}/open`, { method: "POST", headers: { "X-Passcode": code } });
+    if (r.status === 401) { savePass(""); ask("That passcode didn't work.", () => openGate(id, btn)); return; }
+    const body = await r.json().catch(() => ({}));
+    if (!r.ok) { toast(body.error || "The gate didn't open."); return; }
+    savePass(code); toast("Opening the gate.");
+  } catch { toast("Couldn't reach the bridge."); }
+  finally { btn.disabled = false; setTimeout(poll, 1500); }
+}
+
+async function loadCameras() {
+  let data;
+  try { data = await (await fetch("/api/cameras", {cache:"no-store"})).json(); } catch { return; }
+  const cams = (data.cameras || []).filter(c => c.attachment);
+  $("cameras").innerHTML = cams.length ? cams.map(c =>
+    `<div><img src="/api/image?name=${encodeURIComponent(c.attachment)}" alt="${esc(c.name)}" loading="lazy">
+     <div class="when">${esc(c.name)} · ${esc(c.takenAt ? new Date(c.takenAt).toLocaleString() : "")}</div></div>`).join("")
+    : '<p class="note">No picture yet. Tap “Take picture”.</p>';
+}
+
+async function loadActivity() {
+  let data;
+  try { data = await (await fetch("/api/activity", {cache:"no-store"})).json(); } catch { return; }
+  const rows = (data.entries || []).map(e => {
+    const when = e.ConvertedCreatedOn ? new Date(e.ConvertedCreatedOn).toLocaleString() : "";
+    const who = (e.User && e.User.Name) || (e.AdminUser && e.AdminUser.Name) || "Device";
+    const ok = e.IsSuccess === false ? ' class="bad"' : "";
+    return `<tr><td class="when">${esc(when)}</td><td>${esc(e.Description || "")}</td><td>${esc(who)}</td><td${ok}>${esc(e.Response || "")}</td></tr>`;
+  });
+  $("activity").innerHTML = rows.join("") || '<tr><td class="note">No activity.</td></tr>';
+}
+
+$("snap").onclick = async () => {
+  if (!switching) { toast("Set dashboardPasscode in the bridge's config to use this."); return; }
+  const code = pass();
+  if (!code) { ask("Enter the passcode to take a picture.", () => $("snap").click()); return; }
+  $("snap").disabled = true;
+  try {
+    const r = await fetch("/api/pictures", { method: "POST", headers: { "X-Passcode": code } });
+    if (r.status === 401) { savePass(""); ask("That passcode didn't work.", () => $("snap").click()); return; }
+    if (!r.ok) { const b = await r.json().catch(()=>({})); toast(b.error || "Couldn't take a picture."); return; }
+    savePass(code); toast("Taking a picture… it appears in a moment."); setTimeout(loadCameras, 6000);
+  } catch { toast("Couldn't reach the bridge."); } finally { $("snap").disabled = false; }
+};
+
+function ask(what, then) { $("sheetWhat").textContent = what; $("sheetErr").textContent = ""; $("passcode").value = "";
+  $("sheetBack").hidden = false; pending = then; setTimeout(() => $("passcode").focus(), 30); }
+$("sheet").onsubmit = e => { e.preventDefault(); const code = $("passcode").value; if (!code) return;
+  savePass(code); $("sheetBack").hidden = true; const t = pending; pending = null; if (t) t(); };
+$("cancel").onclick = () => { $("sheetBack").hidden = true; pending = null; };
+
+poll(); loadCameras(); loadActivity();
+setInterval(poll, 5000);
+setInterval(loadActivity, 30000);
+setInterval(loadCameras, 60000);
+</script>
+</body>
+</html>

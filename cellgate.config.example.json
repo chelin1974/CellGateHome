@@ -1,0 +1,15 @@
+{
+  "_comment": "Copy to cellgate.config.json and fill in your CellGate login. Keep that file private (chmod 600): it holds your password.",
+
+  "email": "you@example.com",
+  "password": "YOUR_CELLGATE_PASSWORD",
+
+  "bridgeName": "CellGate",
+  "port": 51829,
+
+  "dashboardPort": 8090,
+  "dashboardPasscode": "",
+
+  "prometheusUrl": "",
+  "pollIntervalSeconds": 20
+}

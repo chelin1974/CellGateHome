@@ -1,0 +1,16 @@
+# Build output
+target/
+
+# Your private configuration and the files the bridge writes. Keep these off GitHub:
+# the config holds your CellGate password and the state file holds the HomeKit setup code.
+cellgate.config.json
+cellgate-home.state.json
+cellgate-home.accessories.json
+cellgate-home.layout.json
+cellgate-home.log
+
+# Editors / OS
+.idea/
+*.iml
+.vscode/
+.DS_Store
