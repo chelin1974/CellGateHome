@@ -37,6 +37,14 @@ public final class CellGateClient {
   static final String DEVICE_ACTION = "https://deviceaction.zapopen.com";
   static final String LOG = "https://log.zapopen.com";
 
+  /**
+   * A fixed client key the portal attaches to every request as the {@code is_e} header (its config
+   * calls it {@code Is_E}). The services reject a request without it as unauthenticated — which is
+   * why a sign-in with the right password still came back empty until this was sent.
+   */
+  static final String IS_E =
+      "R3rcMGRoRsCuiU5TkzxTrUvPzihGQBr5h96aApNMALcRKxmjZ2Sg1MsH9gZva7zKA8n5p9qN0kSj4488LYW4X2FZDkCx4f8wbYGn8G7Ps69Cyd5vhQgtdL2wqBO4KW53tmXKlEb0Pjh/MY2gRcxB87KuTBWpxIeAo7SkOMMRAcE=";
+
   /** The portal re-logs in after about an hour; refresh a little sooner. */
   static final Duration SESSION_LIFE = Duration.ofMinutes(50);
 
@@ -278,10 +286,10 @@ public final class CellGateClient {
         .timeout(timeout)
         .header("Content-Type", "application/json")
         .header("Accept", "application/json")
+        .header("is_e", IS_E)
         .POST(HttpRequest.BodyPublishers.ofString(body, StandardCharsets.UTF_8));
-    if (s != null) {
-      request.header("AuthToken", "Bearer " + s.token()).header("AuthKey", s.key());
-    }
+    request.header("AuthToken", s == null ? "Bearer null" : "Bearer " + s.token());
+    request.header("AuthKey", s == null ? "null" : s.key());
     try {
       HttpResponse<String> response = http.send(request.build(), HttpResponse.BodyHandlers.ofString());
       return read(url, response.statusCode(), response.body());
@@ -297,6 +305,7 @@ public final class CellGateClient {
     return HttpRequest.newBuilder(URI.create(url))
         .timeout(timeout)
         .header("Accept", "application/json")
+        .header("is_e", IS_E)
         .header("AuthToken", "Bearer " + s.token())
         .header("AuthKey", s.key())
         .GET();
