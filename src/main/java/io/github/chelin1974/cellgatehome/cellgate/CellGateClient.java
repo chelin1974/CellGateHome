@@ -67,8 +67,9 @@ public final class CellGateClient {
 
   private volatile Session session;
 
-  /** One sign-in: the token and key the portal sends on every later request, plus the user. */
-  record Session(String token, String key, long userId, long accountId, String username, Instant since) {}
+  /** One sign-in: the token, session key and CSRF token the portal sends on later requests. */
+  record Session(String token, String key, String csrf, long userId, long accountId,
+      String username, Instant since) {}
 
   public CellGateClient(String email, String password, Duration requestTimeout) {
     this(email, password, CellGateCrypto.portal(),
@@ -119,9 +120,11 @@ public final class CellGateClient {
     }
 
     String key = firstText(user, "SessionID", "SessionId", "sessionId");
+    String csrf = firstText(reply, "CsrfToken", "csrfToken", "csrf");
     session = new Session(
         token,
         key == null ? "" : key,
+        csrf == null ? "" : csrf,
         firstLong(user, "ID", "Id", "UserID", "UserId"),
         firstLong(user, "AccountID", "AccountId"),
         orElse(firstText(user, "Username", "username"), email),
@@ -287,9 +290,13 @@ public final class CellGateClient {
         .header("Content-Type", "application/json")
         .header("Accept", "application/json")
         .header("is_e", IS_E)
+        .header("responsetype", "blob")
         .POST(HttpRequest.BodyPublishers.ofString(body, StandardCharsets.UTF_8));
     request.header("AuthToken", s == null ? "Bearer null" : "Bearer " + s.token());
     request.header("AuthKey", s == null ? "null" : s.key());
+    if (s != null && s.csrf() != null && !s.csrf().isEmpty()) {
+      request.header("x-csrf-token", s.csrf());
+    }
     try {
       HttpResponse<String> response = http.send(request.build(), HttpResponse.BodyHandlers.ofString());
       return read(url, response.statusCode(), response.body());
@@ -302,13 +309,17 @@ public final class CellGateClient {
   }
 
   private HttpRequest.Builder authGet(String url, Session s) {
-    return HttpRequest.newBuilder(URI.create(encryptedUrl(url, s)))
+    HttpRequest.Builder request = HttpRequest.newBuilder(URI.create(encryptedUrl(url, s)))
         .timeout(timeout)
         .header("Accept", "application/json")
         .header("is_e", IS_E)
+        .header("responsetype", "blob")
         .header("AuthToken", "Bearer " + s.token())
-        .header("AuthKey", s.key())
-        .GET();
+        .header("AuthKey", s.key());
+    if (s.csrf() != null && !s.csrf().isEmpty()) {
+      request.header("x-csrf-token", s.csrf());
+    }
+    return request.GET();
   }
 
   /**
