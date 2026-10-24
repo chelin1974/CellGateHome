@@ -246,8 +246,8 @@ public final class CellGateClient {
   /** Fetches a stored image's bytes by its attachment name, or empty if it isn't there. */
   public Optional<byte[]> image(String attachment) {
     Session s = session();
-    String url = LOG + "/api/Portal/LogImageUpload?filename="
-        + java.net.URLEncoder.encode(attachment, StandardCharsets.UTF_8);
+    // Pass the raw query; encryptedUrl() encrypts the whole thing, so no pre-encoding here.
+    String url = LOG + "/api/Portal/LogImageUpload?filename=" + attachment;
     try {
       HttpResponse<byte[]> response = http.send(authGet(url, s).build(), HttpResponse.BodyHandlers.ofByteArray());
       if (response.statusCode() == 404) {
@@ -302,13 +302,27 @@ public final class CellGateClient {
   }
 
   private HttpRequest.Builder authGet(String url, Session s) {
-    return HttpRequest.newBuilder(URI.create(url))
+    return HttpRequest.newBuilder(URI.create(encryptedUrl(url, s)))
         .timeout(timeout)
         .header("Accept", "application/json")
         .header("is_e", IS_E)
         .header("AuthToken", "Bearer " + s.token())
         .header("AuthKey", s.key())
         .GET();
+  }
+
+  /**
+   * The portal does not send GET parameters in the clear: it encrypts the whole query string into a
+   * {@code request=…} value and appends the encrypted session key as {@code value=…}. A plain
+   * {@code ?UserId=…} is simply ignored by the server, which is why a signed-in account looked
+   * empty. Rewrite {@code path?query} the same way; a query-less URL is left untouched.
+   */
+  private String encryptedUrl(String url, Session s) {
+    int q = url.indexOf('?');
+    if (q < 0) {
+      return url;
+    }
+    return url.substring(0, q) + "?" + crypto.query(url.substring(q + 1), s.key());
   }
 
   private JsonNode read(String url, int status, String body) {
