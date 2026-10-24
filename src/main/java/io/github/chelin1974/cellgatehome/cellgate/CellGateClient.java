@@ -80,19 +80,92 @@ public final class CellGateClient {
     String json = MAPPER.createObjectNode().put("username", email).put("password", password).toString();
     // Login is the one call sent without a session key (there isn't one yet).
     JsonNode reply = postJson(ACCOUNTKIT + "/api/AccountKit/userlogin", crypto.body(json, null), null);
-    JsonNode user = reply.path("user");
-    if (!user.isObject() || !reply.hasNonNull("AuthToken")) {
+
+    // The portal has wrapped the login reply differently across versions, so look for the pieces
+    // in the likely places rather than one fixed path: the body itself, or a "data"/"Data" envelope.
+    JsonNode envelope = firstObject(reply, "data", "Data");
+    JsonNode user = firstObject(reply, "user", "User");
+    if (user == null && envelope != null) {
+      user = firstObject(envelope, "user", "User");
+    }
+    if (user == null && hasAny(reply, "SessionID", "ID", "AccountID")) {
+      user = reply; // the reply *is* the user object
+    }
+    if (user == null && envelope != null && hasAny(envelope, "SessionID", "ID", "AccountID")) {
+      user = envelope;
+    }
+
+    String token = firstText(reply, "AuthToken", "Token", "token", "access_token");
+    if (token == null && envelope != null) {
+      token = firstText(envelope, "AuthToken", "Token", "token", "access_token");
+    }
+    if (token == null && user != null) {
+      token = firstText(user, "AuthToken", "Token", "token", "access_token");
+    }
+
+    if (user == null || token == null) {
+      // Came back, but not in a shape we recognise. Log the structure — field names and types
+      // only, never values or tokens — so the parsing can be matched to the real reply.
+      log.error("unexpected sign-in response; its structure was: {}", describe(reply));
       throw new CellGateException("the CellGate sign-in was refused; check the email and password.");
     }
+
+    String key = firstText(user, "SessionID", "SessionId", "sessionId");
     session = new Session(
-        reply.get("AuthToken").asText(),
-        user.path("SessionID").asText(),
-        user.path("ID").asLong(),
-        user.path("AccountID").asLong(),
-        user.path("Username").asText(email),
+        token,
+        key == null ? "" : key,
+        firstLong(user, "ID", "Id", "UserID", "UserId"),
+        firstLong(user, "AccountID", "AccountId"),
+        orElse(firstText(user, "Username", "username"), email),
         Instant.now());
     log.info("signed in to CellGate as {}", session.username());
     return session;
+  }
+
+  private static JsonNode firstObject(JsonNode node, String... keys) {
+    for (String key : keys) {
+      JsonNode v = node.get(key);
+      if (v != null && v.isObject()) {
+        return v;
+      }
+    }
+    return null;
+  }
+
+  private static boolean hasAny(JsonNode node, String... keys) {
+    for (String key : keys) {
+      if (node.hasNonNull(key)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  private static String firstText(JsonNode node, String... keys) {
+    for (String key : keys) {
+      JsonNode v = node.get(key);
+      if (v != null && v.isValueNode() && !v.isNull()) {
+        String s = v.asText(null);
+        if (s != null && !s.isBlank()) {
+          return s;
+        }
+      }
+    }
+    return null;
+  }
+
+  private static long firstLong(JsonNode node, String... keys) {
+    for (String key : keys) {
+      JsonNode v = node.get(key);
+      if (v != null && !v.isNull()) {
+        return v.asLong();
+      }
+    }
+    return 0L;
+  }
+
+  private static String orElse(String value, String fallback) {
+    return value == null ? fallback : value;
   }
 
   private Session session() {
@@ -247,5 +320,48 @@ public final class CellGateClient {
   private static String path(String url) {
     int i = url.indexOf("/api/");
     return i < 0 ? url : url.substring(i);
+  }
+
+  /** A compact "field:type" sketch of a JSON node, one level deep, with no values or tokens. */
+  private static String describe(JsonNode node) {
+    if (node == null || node.isNull()) {
+      return "(empty)";
+    }
+    if (node.isArray()) {
+      return "[array of " + node.size() + (node.size() > 0 ? ", first=" + describe(node.get(0)) : "") + "]";
+    }
+    if (!node.isObject()) {
+      return node.getNodeType().toString().toLowerCase(java.util.Locale.ROOT);
+    }
+    StringBuilder sb = new StringBuilder("{");
+    var fields = node.fields();
+    boolean first = true;
+    while (fields.hasNext()) {
+      var e = fields.next();
+      if (!first) {
+        sb.append(", ");
+      }
+      first = false;
+      JsonNode v = e.getValue();
+      sb.append(e.getKey()).append(':');
+      if (v.isObject()) {
+        sb.append('{');
+        var inner = v.fieldNames();
+        boolean f2 = true;
+        while (inner.hasNext()) {
+          if (!f2) {
+            sb.append(',');
+          }
+          f2 = false;
+          sb.append(inner.next());
+        }
+        sb.append('}');
+      } else if (v.isArray()) {
+        sb.append("[array]");
+      } else {
+        sb.append(v.getNodeType().toString().toLowerCase(java.util.Locale.ROOT));
+      }
+    }
+    return sb.append('}').toString();
   }
 }
