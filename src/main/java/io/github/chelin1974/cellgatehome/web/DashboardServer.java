@@ -34,6 +34,7 @@ import org.slf4j.LoggerFactory;
  *   GET  /api/activity              recent CellGate activity (openings, codes, pictures)
  *   GET  /api/cameras               the latest picture for each camera
  *   GET  /api/image?name=...        the bytes of one stored picture
+ *   GET  /snapshot.jpg[?port=id]    the latest still as plain JPEG (for Homebridge/Scrypted)
  *   POST /api/gates/{id}/open       open a gate, with header X-Passcode
  *   POST /api/pictures              take a fresh picture, with header X-Passcode
  * </pre>
@@ -109,6 +110,8 @@ public final class DashboardServer implements AutoCloseable {
         proxy(exchange, () -> Map.of("cameras", model.cameras()));
       } else if (method.equals("GET") && path.equals("/api/image")) {
         image(exchange);
+      } else if (method.equals("GET") && path.equals("/snapshot.jpg")) {
+        snapshot(exchange);
       } else if (method.equals("POST") && path.equals("/api/pictures")) {
         takePicture(exchange, remote);
       } else {
@@ -169,6 +172,38 @@ public final class DashboardServer implements AutoCloseable {
     }
     exchange.getResponseHeaders().set("Content-Type", "image/jpeg");
     exchange.getResponseHeaders().set("Cache-Control", "max-age=86400");
+    exchange.sendResponseHeaders(200, bytes.get().length);
+    try (OutputStream out = exchange.getResponseBody()) {
+      out.write(bytes.get());
+    }
+  }
+
+  /** The latest camera still as a plain JPEG, for Homebridge/Scrypted to poll. No passcode: a
+   *  read, LAN-only like the other image routes, so camera-ffmpeg can fetch it without headers. */
+  private void snapshot(HttpExchange exchange) throws IOException {
+    String query = exchange.getRequestURI().getRawQuery();
+    String portText = query == null ? null : paramValue(query, "port");
+    Long portId = null;
+    if (portText != null && !portText.isBlank()) {
+      try {
+        portId = Long.parseLong(portText.trim());
+      } catch (NumberFormatException ignore) {
+        // fall through to the first camera
+      }
+    }
+    Optional<byte[]> bytes;
+    try {
+      bytes = model.latestSnapshot(portId);
+    } catch (RuntimeException e) {
+      send(exchange, 502, Map.of("error", "CellGate didn't answer: " + e.getMessage()));
+      return;
+    }
+    if (bytes.isEmpty()) {
+      send(exchange, 404, Map.of("error", "No snapshot available yet."));
+      return;
+    }
+    exchange.getResponseHeaders().set("Content-Type", "image/jpeg");
+    exchange.getResponseHeaders().set("Cache-Control", "no-store");
     exchange.sendResponseHeaders(200, bytes.get().length);
     try (OutputStream out = exchange.getResponseBody()) {
       out.write(bytes.get());

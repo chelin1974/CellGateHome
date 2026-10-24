@@ -122,4 +122,31 @@ public final class DashboardModel {
   public Optional<byte[]> image(String attachment) {
     return client.image(attachment);
   }
+
+  /**
+   * The latest stored picture as JPEG bytes, for a plain {@code /snapshot.jpg} that tools such as
+   * Homebridge's camera-ffmpeg can poll. With a {@code portId} it picks that camera, otherwise the
+   * first one. This is the most recent still CellGate holds, not a fresh capture.
+   */
+  public Optional<byte[]> latestSnapshot(Long portId) {
+    List<Map<String, Object>> cams = cameras();
+    if (cams.isEmpty()) {
+      return Optional.empty();
+    }
+    Map<String, Object> chosen = null;
+    if (portId != null) {
+      for (Map<String, Object> cam : cams) {
+        Object id = cam.get("portId");
+        if (id instanceof Number n && n.longValue() == portId) {
+          chosen = cam;
+          break;
+        }
+      }
+    }
+    if (chosen == null) {
+      chosen = cams.get(0);
+    }
+    Object attachment = chosen.get("attachment");
+    return attachment == null ? Optional.empty() : image(attachment.toString());
+  }
 }

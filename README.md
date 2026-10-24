@@ -178,6 +178,37 @@ like an app.
 - **Home network only.** The dashboard answers private, link-local and loopback addresses and
   refuses everything else. It has no HTTPS; use it on networks you trust.
 - `"dashboardPort": 0` turns it off.
+- **`GET /snapshot.jpg`** returns the latest stored still as a plain JPEG (no passcode, LAN-only
+  like the other image routes). Add `?port=<id>` to pick a specific camera. See below.
+
+## A camera tile in Apple Home (optional, via Homebridge)
+
+HAP-Java has no camera support and the Watchman only takes on-demand stills, so this bridge can't
+publish a HomeKit camera itself. But `GET /snapshot.jpg` exposes the latest still as a plain image,
+and [Homebridge](https://homebridge.io) with
+[homebridge-camera-ffmpeg](https://github.com/Sunoo/homebridge-camera-ffmpeg) can present a
+still-image source as a HomeKit camera. Point it at the dashboard:
+
+```json
+{
+  "platform": "Camera-ffmpeg",
+  "cameras": [
+    {
+      "name": "Front Gate",
+      "videoConfig": {
+        "source": "-loop 1 -i http://<this-machine>.local:8090/snapshot.jpg",
+        "stillImageSource": "-i http://<this-machine>.local:8090/snapshot.jpg",
+        "maxFPS": 2,
+        "maxWidth": 1280
+      }
+    }
+  ]
+}
+```
+
+It shows the **most recent** picture (refreshed when a picture is taken), not smooth live video —
+an on-demand still with a few seconds of latency. Tap **Take picture** on the dashboard, or trigger
+the camera from an automation, to refresh it.
 
 ## History with Prometheus (OpenTelemetry)
 
