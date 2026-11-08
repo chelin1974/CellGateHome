@@ -75,6 +75,18 @@ public final class Main {
   private static void run(CellGateConfig config) throws Exception {
     CellGateHomeBridge bridge = new CellGateHomeBridge(config);
     Runtime.getRuntime().addShutdownHook(new Thread(bridge::close, "cellgate-home-shutdown"));
+
+    // If the mDNS responder dies the bridge is invisible to Apple Home, and JmDNS does not
+    // recover, so the only fix is a fresh process. Exit non-zero and let the service
+    // manager restart us - cellgate-home.service sets Restart=on-failure, and a Kubernetes
+    // liveness probe on /healthz gets there first. Run by hand without a supervisor, this
+    // stops rather than pretending to work.
+    bridge.onAdvertisementFailure(
+        reason -> {
+          log.error("exiting so the service manager restarts the bridge: {}", reason);
+          System.exit(70);
+        });
+
     bridge.start();
     bridge.awaitTermination();
   }

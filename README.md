@@ -163,6 +163,56 @@ sudo ufw allow 5353/udp    # Bonjour
 sudo ufw allow 8090/tcp    # Gate Board (the "dashboardPort" setting)
 ```
 
+## Docker and Kubernetes
+
+A `Dockerfile` builds the bridge, `compose.yaml` runs it under plain Docker, and
+`deploy/k8s/` holds Kubernetes manifests. Images are published to
+`ghcr.io/chelin1974/cellgate-home` by `.github/workflows/image.yml` for amd64 and arm64.
+
+```bash
+cp cellgate.config.k8s.example.json cellgate.config.json   # then fill it in
+docker compose up -d
+kubectl apply -k deploy/k8s                 # then create the Secret - see deploy/k8s/README.md
+```
+
+**One thing decides the shape of all of it: HomeKit needs mDNS multicast on your LAN, and
+a container on a bridge or overlay network cannot do multicast.** Discovery and resolution
+are multicast to `224.0.0.251:5353` on the local link; without it the Home app never finds
+the bridge, and a bridge that was already paired stops resolving and shows every accessory
+as "No Response".
+
+So both run on the host's network — `network_mode: host` under Docker, `hostNetwork: true`
+in Kubernetes. That in turn means:
+
+- The container's ports are the host's ports: `8090` for the dashboard, `51829` for HomeKit.
+  (The Daikin bridge uses `8080` and `51826`, so the two can share a node.)
+- In Kubernetes the pod must be pinned to a node that is physically on the same LAN as your
+  Apple TV or HomePod, which is what the `homekit=true` `nodeSelector` is for. mDNS does not
+  cross subnets, so **a cloud cluster cannot host this at all** — it needs a node at home.
+- Docker Desktop on macOS and Windows does not give a container the real LAN, so host
+  networking does not help there. Run it on a Linux box on your network.
+
+Three more things that are easy to get wrong:
+
+- **The pairing state must be on a volume**, and `storagePath` in the config must point at
+  it. `cellgate-home.state.json` holds the bridge's HomeKit identity and every paired
+  controller's key; lose it and you re-pair everything.
+- **One replica, `strategy: Recreate`.** Two of these would fight over the HomeKit port,
+  poll the same CellGate account, and ring the doorbell twice for one visitor.
+- **The config file holds your CellGate password**, so it is mounted in from a Secret rather
+  than baked into the image. Never commit a filled-in copy.
+
+One failure gets special handling. JmDNS — the mDNS responder HomeKit depends on — can die
+under a running bridge, and when it does it never comes back: the bridge keeps serving the
+dashboard while being invisible to Apple Home. The bridge now watches for that, through the
+library's own `cannotRecoverFromIOError` callback and a periodic check that multicast still
+works, and turns `GET /healthz` into a 503 with the reason. The process then exits 70 so
+whatever supervises it restarts a bridge that cannot repair itself. The dashboard keeps
+serving throughout, so the reason stays readable.
+
+`deploy/k8s/README.md` has the full walkthrough, including what a CellGate outage looks like
+from Kubernetes.
+
 ## Gate Board dashboard
 
 The bridge serves a dashboard on your home network: the gate's state with an **Open** button, the

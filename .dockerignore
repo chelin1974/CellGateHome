@@ -1,0 +1,20 @@
+target/
+
+.git/
+.gitignore
+.github/
+
+# Never bake credentials or pairing state into an image.
+cellgate.config.json
+*.state.json
+
+deploy/
+docs/
+*.md
+!README.md
+
+.idea/
+*.iml
+.vscode/
+.DS_Store
+*.log

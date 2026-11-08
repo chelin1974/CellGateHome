@@ -1,0 +1,142 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cellgate-home
+  labels:
+    app.kubernetes.io/name: cellgate-home
+spec:
+  # One, always. Two of these would both bind the HomeKit port, both advertise the same
+  # bridge over mDNS, and both write the same pairing-state file. A second adds nothing:
+  # the work is one poll of a cloud API every 20 seconds.
+  replicas: 1
+
+  # Recreate, not RollingUpdate. A rolling update would start the new pod before the old
+  # one exits, and it would fail to bind the HomeKit port on the host network and sit in
+  # CrashLoopBackOff while the old pod kept serving. Recreate accepts a few seconds of
+  # downtime instead.
+  strategy:
+    type: Recreate
+
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: cellgate-home
+
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: cellgate-home
+      annotations:
+        # Restarts the pod when the config Secret changes, which it otherwise would not
+        # notice: the file is read once at startup. Replace this with your own checksum,
+        # or just `kubectl rollout restart` after editing the Secret.
+        config-reload: "edit-me-to-force-a-restart"
+    spec:
+      # THE reason this manifest looks the way it does.
+      #
+      # HomeKit discovery and resolution are mDNS: multicast to 224.0.0.251:5353 on the
+      # local link. A pod on the cluster's overlay network cannot send or receive that,
+      # so the Home app would never find the bridge, and a bridge that was already paired
+      # would stop resolving and show every accessory as "No Response".
+      #
+      # hostNetwork puts the pod directly on the node's LAN interface, which is the only
+      # way this works short of a macvlan/ipvlan CNI. The costs: the container's ports are
+      # the node's ports (nothing else on that node may use 8090 or 51829), and the pod
+      # can reach anything the node can.
+      hostNetwork: true
+
+      # Without this, a hostNetwork pod inherits the node's resolv.conf and loses cluster
+      # DNS - so it could not resolve, say, an in-cluster Prometheus by service name.
+      dnsPolicy: ClusterFirstWithHostNet
+
+      # The node must sit on the same LAN/VLAN as your Apple TV or HomePod; mDNS does not
+      # cross subnets. Pin it:
+      #   kubectl label node <node-name> homekit=true
+      nodeSelector:
+        homekit: "true"
+
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        # So the mounted volume is writable by the non-root user.
+        fsGroup: 10001
+
+      terminationGracePeriodSeconds: 30
+
+      containers:
+        - name: cellgate-home
+          image: ghcr.io/chelin1974/cellgate-home:latest
+          imagePullPolicy: IfNotPresent
+
+          ports:
+            - name: dashboard
+              containerPort: 8090
+              protocol: TCP
+            - name: homekit
+              containerPort: 51829
+              protocol: TCP
+
+          volumeMounts:
+            # The whole config file, password included, comes from a Secret.
+            - name: config
+              mountPath: /config
+              readOnly: true
+            - name: state
+              mountPath: /data
+            # readOnlyRootFilesystem is on and the JVM wants a temp dir.
+            - name: tmp
+              mountPath: /tmp
+
+          # /healthz turns 503 once the mDNS responder has died, which is the one failure
+          # a liveness probe on this bridge actually needs to catch: the dashboard keeps
+          # serving perfectly while nothing in Apple Home can reach the bridge, and JmDNS
+          # never recovers on its own. Probing the dashboard page instead would pass
+          # forever through exactly that fault.
+          startupProbe:
+            httpGet:
+              path: /healthz
+              port: dashboard
+            periodSeconds: 5
+            failureThreshold: 24
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: dashboard
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 4
+          readinessProbe:
+            httpGet:
+              path: /api/state
+              port: dashboard
+            periodSeconds: 10
+            timeoutSeconds: 5
+
+          resources:
+            requests:
+              cpu: 100m
+              memory: 192Mi
+            limits:
+              # No CPU limit on purpose: CFS throttling adds latency to the mDNS
+              # responder and HomeKit is sensitive to a slow reply. Memory is capped; the
+              # image sets -XX:MaxRAMPercentage=70, so the heap follows this number.
+              memory: 512Mi
+
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+
+      volumes:
+        - name: config
+          secret:
+            secretName: cellgate-home-config
+            items:
+              - key: cellgate.config.json
+                path: cellgate.config.json
+        - name: state
+          persistentVolumeClaim:
+            claimName: cellgate-home-state
+        - name: tmp
+          emptyDir: {}

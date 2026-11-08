@@ -1,0 +1,30 @@
+# Optional: a hostname for the dashboard instead of <node-ip>:8090.
+#
+# Skip this file entirely if you do not run an ingress controller - with hostNetwork the
+# dashboard is already served on the node's own address. Delete it from kustomization.yaml
+# if so, or `kubectl apply` will create an Ingress nothing serves.
+#
+# Set the host to a name your DNS (or /etc/hosts) resolves to the ingress controller, and
+# ingressClassName to your controller (nginx, traefik, ...).
+#
+# The dashboard's own `dashboardPasscode` guards opening the gate, but the page and the
+# activity log are readable by anyone who can reach it. Keep the hostname on your LAN.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: cellgate-home
+  labels:
+    app.kubernetes.io/name: cellgate-home
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: gate.home.arpa
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: cellgate-home
+                port:
+                  name: dashboard
