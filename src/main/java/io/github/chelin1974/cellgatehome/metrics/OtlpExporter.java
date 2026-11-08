@@ -1,6 +1,6 @@
 package io.github.chelin1974.cellgatehome.metrics;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.ObjectMapper;
 import io.github.chelin1974.cellgatehome.metrics.CellGateMetrics.Point;
 import java.util.List;
 import java.util.function.Supplier;

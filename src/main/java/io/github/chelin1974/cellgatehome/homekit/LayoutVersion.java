@@ -1,7 +1,8 @@
 package io.github.chelin1974.cellgatehome.homekit;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.core.JacksonException;
+import tools.jackson.databind.ObjectMapper;
 import io.github.hapjava.accessories.HomekitAccessory;
 import io.github.hapjava.characteristics.Characteristic;
 import io.github.hapjava.services.Service;
@@ -55,7 +56,7 @@ public final class LayoutVersion {
     state.fingerprint = fingerprint;
     try {
       Files.writeString(file, MAPPER.writeValueAsString(state));
-    } catch (IOException e) {
+    } catch (IOException | JacksonException e) {
       log.warn("could not save {}: {}", file, e.getMessage());
     }
     if (first) {
@@ -104,7 +105,7 @@ public final class LayoutVersion {
     }
     try {
       return MAPPER.readValue(Files.readString(file), State.class);
-    } catch (IOException e) {
+    } catch (IOException | JacksonException e) {
       return new State();
     }
   }

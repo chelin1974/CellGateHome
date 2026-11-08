@@ -1,6 +1,6 @@
 package io.github.chelin1974.cellgatehome.web;
 
-import com.fasterxml.jackson.databind.JsonNode;
+import tools.jackson.databind.JsonNode;
 import io.github.chelin1974.cellgatehome.cellgate.CellGateClient;
 import io.github.chelin1974.cellgatehome.cellgate.Watchman;
 import io.github.chelin1974.cellgatehome.homekit.GateAccessory;
@@ -111,8 +111,8 @@ public final class DashboardModel {
       Map<String, Object> m = new LinkedHashMap<>();
       m.put("portId", portId);
       m.put("name", names.getOrDefault(portId, "Camera"));
-      m.put("attachment", data.path("Attachments").asText(null));
-      m.put("takenAt", data.path("ConvertedCreatedOn").asText(null));
+      m.put("attachment", data.path("Attachments").asString(null));
+      m.put("takenAt", data.path("ConvertedCreatedOn").asString(null));
       out.add(m);
     }
     return out;

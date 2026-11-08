@@ -1,7 +1,7 @@
 package io.github.chelin1974.cellgatehome.web;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
 import io.github.chelin1974.cellgatehome.web.DashboardModel.OpenResult;

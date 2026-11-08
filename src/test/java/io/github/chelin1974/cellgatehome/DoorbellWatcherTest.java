@@ -3,9 +3,9 @@ package io.github.chelin1974.cellgatehome;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ArrayNode;
-import com.fasterxml.jackson.databind.node.ObjectNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.node.ArrayNode;
+import tools.jackson.databind.node.ObjectNode;
 import io.github.chelin1974.cellgatehome.homekit.DoorbellWatcher;
 import io.github.chelin1974.cellgatehome.homekit.GateDoorbell;
 import io.github.hapjava.characteristics.impl.common.ProgrammableSwitchEnum;

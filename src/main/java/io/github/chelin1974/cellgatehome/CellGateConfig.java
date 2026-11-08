@@ -1,7 +1,8 @@
 package io.github.chelin1974.cellgatehome;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.core.JacksonException;
+import tools.jackson.databind.ObjectMapper;
 import java.io.IOException;
 import java.net.URI;
 import java.nio.file.Files;
@@ -207,7 +208,7 @@ public final class CellGateConfig {
     Raw raw;
     try {
       raw = new ObjectMapper().readValue(Files.readString(file), Raw.class);
-    } catch (IOException e) {
+    } catch (IOException | JacksonException e) {
       throw new ConfigException("could not parse " + file.toAbsolutePath() + ": " + e.getMessage(), e);
     }
     Path parent = file.toAbsolutePath().getParent();

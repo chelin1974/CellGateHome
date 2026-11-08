@@ -1,7 +1,8 @@
 package io.github.chelin1974.cellgatehome.homekit;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.core.JacksonException;
+import tools.jackson.databind.ObjectMapper;
 import io.github.hapjava.server.HomekitAuthInfo;
 import io.github.hapjava.server.impl.HomekitServer;
 import java.io.IOException;
@@ -86,6 +87,8 @@ public final class FileAuthInfo implements HomekitAuthInfo {
       return info;
     } catch (IOException e) {
       throw new UncheckedIOException("could not read or create " + file, e);
+    } catch (JacksonException e) {
+      throw new UncheckedIOException("could not read or create " + file, new IOException(e.getMessage(), e));
     } catch (InvalidAlgorithmParameterException e) {
       throw new IllegalStateException("could not generate a HomeKit private key", e);
     }
@@ -166,6 +169,8 @@ public final class FileAuthInfo implements HomekitAuthInfo {
       restrictPermissions();
     } catch (IOException e) {
       throw new UncheckedIOException("could not save HomeKit pairing state to " + file, e);
+    } catch (JacksonException e) {
+      throw new UncheckedIOException("could not save HomeKit pairing state to " + file, new IOException(e.getMessage(), e));
     }
   }
 
