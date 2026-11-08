@@ -1,0 +1,13 @@
+# Grafana picks up this Prometheus automatically when started with:
+#   docker compose --profile metrics up -d
+#
+# CellGateHome's own datasource. The URL is the compose service name, so it resolves inside
+# this project's network and cannot accidentally read another bridge's Prometheus.
+apiVersion: 1
+datasources:
+  - name: Prometheus
+    uid: prometheus
+    type: prometheus
+    access: proxy
+    url: http://prometheus:9090
+    isDefault: true

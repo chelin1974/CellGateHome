@@ -1,0 +1,27 @@
+# Prometheus 3 for CellGateHome: the bridge pushes OTLP metrics; nothing is scraped.
+#
+# Run with:  prometheus --config.file=prometheus.yml --web.enable-otlp-receiver
+# or just:   docker compose --profile metrics up -d
+#
+# This stack is CellGateHome's own. It shares nothing with the DaikinHome or SpanHome
+# bridges - separate config, separate storage, its own ports - so any one of them runs with
+# or without the others, and this stack runs alongside either of theirs:
+#
+#   SpanHome      Prometheus 9090   Grafana 3000
+#   DaikinHome    Prometheus 9090   Grafana 3000
+#   CellGateHome  Prometheus 9092   Grafana 3002
+#
+# SpanHome and DaikinHome serve theirs on the same pair, so run only one of those two.
+global:
+  scrape_interval: 1m
+
+otlp:
+  # Keep the bridge's service name as a label on every series, so if you ever do point two
+  # bridges at one Prometheus their series stay tellable apart.
+  promote_resource_attributes:
+    - service.name
+
+storage:
+  tsdb:
+    # Lets late pushes land, e.g. after the bridge's machine wakes from sleep.
+    out_of_order_time_window: 30m
