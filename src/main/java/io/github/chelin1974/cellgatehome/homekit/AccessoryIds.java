@@ -1,8 +1,10 @@
 package io.github.chelin1974.cellgatehome.homekit;
 
-import com.fasterxml.jackson.core.type.TypeReference;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.SerializationFeature;
+import tools.jackson.core.JacksonException;
+import tools.jackson.core.type.TypeReference;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.SerializationFeature;
+import tools.jackson.databind.json.JsonMapper;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.file.Files;
@@ -23,7 +25,7 @@ public final class AccessoryIds {
   /** HomeKit reserves ID 1 for the bridge itself. */
   static final int FIRST_ID = 2;
 
-  private static final ObjectMapper MAPPER = new ObjectMapper().enable(SerializationFeature.INDENT_OUTPUT);
+  private static final ObjectMapper MAPPER = JsonMapper.builder().enable(SerializationFeature.INDENT_OUTPUT).build();
 
   private final Path file;
   private final Map<String, Integer> ids;
@@ -42,6 +44,8 @@ public final class AccessoryIds {
       return new AccessoryIds(file, new TreeMap<>(MAPPER.readValue(Files.readString(file), new TypeReference<Map<String, Integer>>() {})));
     } catch (IOException e) {
       throw new UncheckedIOException("could not read " + file.toAbsolutePath(), e);
+    } catch (JacksonException e) {
+      throw new UncheckedIOException("could not read " + file.toAbsolutePath(), new IOException(e.getMessage(), e));
     }
   }
 
@@ -74,6 +78,8 @@ public final class AccessoryIds {
       dirty = false;
     } catch (IOException e) {
       throw new UncheckedIOException("could not write " + file.toAbsolutePath(), e);
+    } catch (JacksonException e) {
+      throw new UncheckedIOException("could not write " + file.toAbsolutePath(), new IOException(e.getMessage(), e));
     }
   }
 }

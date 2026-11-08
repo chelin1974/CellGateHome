@@ -1,6 +1,6 @@
 package io.github.chelin1974.cellgatehome.cellgate;
 
-import com.fasterxml.jackson.databind.JsonNode;
+import tools.jackson.databind.JsonNode;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
@@ -131,6 +131,6 @@ public record Watchman(
 
   private static String text(JsonNode node, String field) {
     JsonNode v = node.path(field);
-    return v.isMissingNode() || v.isNull() ? null : v.asText().trim();
+    return v.isMissingNode() || v.isNull() ? null : v.asString().trim();
   }
 }

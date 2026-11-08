@@ -1,7 +1,8 @@
 package io.github.chelin1974.cellgatehome.cellgate;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.core.JacksonException;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
 import java.io.IOException;
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -156,7 +157,7 @@ public final class CellGateClient {
     for (String key : keys) {
       JsonNode v = node.get(key);
       if (v != null && v.isValueNode() && !v.isNull()) {
-        String s = v.asText(null);
+        String s = v.asString(null);
         if (s != null && !s.isBlank()) {
           return s;
         }
@@ -346,7 +347,7 @@ public final class CellGateClient {
     }
     try {
       return body == null || body.isBlank() ? MAPPER.createObjectNode() : MAPPER.readTree(body);
-    } catch (IOException e) {
+    } catch (JacksonException e) {
       throw new CellGateException("could not read CellGate's reply from " + path(url), e);
     }
   }
@@ -368,7 +369,7 @@ public final class CellGateClient {
       return node.getNodeType().toString().toLowerCase(java.util.Locale.ROOT);
     }
     StringBuilder sb = new StringBuilder("{");
-    var fields = node.fields();
+    var fields = node.properties().iterator();
     boolean first = true;
     while (fields.hasNext()) {
       var e = fields.next();
@@ -380,7 +381,7 @@ public final class CellGateClient {
       sb.append(e.getKey()).append(':');
       if (v.isObject()) {
         sb.append('{');
-        var inner = v.fieldNames();
+        var inner = v.propertyNames().iterator();
         boolean f2 = true;
         while (inner.hasNext()) {
           if (!f2) {

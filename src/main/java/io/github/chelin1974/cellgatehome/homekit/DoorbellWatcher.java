@@ -1,6 +1,6 @@
 package io.github.chelin1974.cellgatehome.homekit;
 
-import com.fasterxml.jackson.databind.JsonNode;
+import tools.jackson.databind.JsonNode;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -140,7 +140,7 @@ public final class DoorbellWatcher {
     for (String key : keys) {
       JsonNode node = entry.get(key);
       if (node != null && !node.isNull()) {
-        String value = node.asText(null);
+        String value = node.asString(null);
         if (value != null && !value.isBlank()) {
           return value;
         }

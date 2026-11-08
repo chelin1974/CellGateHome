@@ -53,14 +53,14 @@ class CellGateCryptoTest {
     gen.initialize(1024);
     KeyPair pair = gen.generateKeyPair();
     CellGateCrypto crypto = new CellGateCrypto(pair.getPublic());
-    com.fasterxml.jackson.databind.JsonNode login =
-        new com.fasterxml.jackson.databind.ObjectMapper().readTree(crypto.body("{\"a\":1}", null));
-    assertEquals("", login.path("Value").asText());
-    assertEquals("{\"a\":1}", decrypt(login.path("Data").asText(), pair.getPrivate()));
+    tools.jackson.databind.JsonNode login =
+        new tools.jackson.databind.ObjectMapper().readTree(crypto.body("{\"a\":1}", null));
+    assertEquals("", login.path("Value").asString());
+    assertEquals("{\"a\":1}", decrypt(login.path("Data").asString(), pair.getPrivate()));
 
-    com.fasterxml.jackson.databind.JsonNode withKey =
-        new com.fasterxml.jackson.databind.ObjectMapper().readTree(crypto.body("{}", "sessionkey"));
-    assertEquals("sessionkey", decrypt(withKey.path("Value").asText(), pair.getPrivate()));
+    tools.jackson.databind.JsonNode withKey =
+        new tools.jackson.databind.ObjectMapper().readTree(crypto.body("{}", "sessionkey"));
+    assertEquals("sessionkey", decrypt(withKey.path("Value").asString(), pair.getPrivate()));
   }
 
   @Test
