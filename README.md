@@ -52,8 +52,9 @@ remotely from the app (that leaves no snapshot), so it means "someone is physica
 
 ## Requirements
 
-- **Java 21 or newer**: `brew install openjdk@21` on a Mac,
-  `sudo apt install openjdk-21-jre-headless` on Debian or Ubuntu. Maven to build.
+- **Java 27**: `brew install openjdk@27` on a Mac, `sudo apt install openjdk-27-jre-headless`
+  on Debian or Ubuntu. Maven to build. The build targets 27, so an older JDK will not compile
+  it; note that 27 is a six-month release rather than an LTS, superseded by 28 in March 2027.
 - **A CellGate Watchman** (checked against the Watchman EVO / WTM-S2 single-family unit) and the
   email and password you use with the CellGate app or user.zapopen.com.
 - **A machine that stays on**, on the same network as your Home hub (Apple TV or HomePod).
@@ -144,7 +145,7 @@ tail -f ~/Library/Logs/cellgate-home.log   # setup code and dashboard address
 from `/opt/cellgate-home`.
 
 ```bash
-sudo apt install openjdk-21-jre-headless
+sudo apt install openjdk-27-jre-headless
 sudo useradd --system --home-dir /opt/cellgate-home --shell /usr/sbin/nologin cellgate
 sudo mkdir -p /opt/cellgate-home
 sudo cp target/cellgate-home.jar cellgate.config.json /opt/cellgate-home/

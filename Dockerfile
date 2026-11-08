@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 
 # ---------------------------------------------------------------- build stage
-FROM maven:3.9-eclipse-temurin-21 AS build
+FROM maven:3.10-eclipse-temurin-27 AS build
 WORKDIR /src
 
 COPY pom.xml ./
@@ -12,7 +12,7 @@ COPY src src
 RUN --mount=type=cache,target=/root/.m2 mvn -B -ntp -DskipTests package
 
 # -------------------------------------------------------------- runtime stage
-FROM eclipse-temurin:21-jre
+FROM eclipse-temurin:27-jre
 
 LABEL org.opencontainers.image.title="CellGate HomeKit bridge" \
       org.opencontainers.image.description="CellGate gate and doorbell in Apple Home, with a dashboard" \
