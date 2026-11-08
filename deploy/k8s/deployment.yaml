@@ -87,18 +87,20 @@ spec:
             - name: tmp
               mountPath: /tmp
 
-          # GET / is the dashboard page itself: unauthenticated, served from memory, and
-          # the cheapest thing that proves the HTTP listener is alive. The passcode only
-          # gates the POST endpoints that open the gate.
+          # /healthz turns 503 once the mDNS responder has died, which is the one failure
+          # a liveness probe on this bridge actually needs to catch: the dashboard keeps
+          # serving perfectly while nothing in Apple Home can reach the bridge, and JmDNS
+          # never recovers on its own. Probing the dashboard page instead would pass
+          # forever through exactly that fault.
           startupProbe:
             httpGet:
-              path: /
+              path: /healthz
               port: dashboard
             periodSeconds: 5
             failureThreshold: 24
           livenessProbe:
             httpGet:
-              path: /
+              path: /healthz
               port: dashboard
             periodSeconds: 30
             timeoutSeconds: 5

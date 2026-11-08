@@ -95,14 +95,27 @@ Daikin bridge deliberately behaves the other way round (it comes up, serves, rep
 unhealthy and retries in the background); making this one match would be a change to its
 startup sequence, not to these manifests.
 
-## A known gap
+## When the mDNS responder dies
 
-The bridge does not notice if JmDNS dies after startup — which it does, loudly, when a
-node's network changes under it. The dashboard keeps serving and the liveness probe keeps
-passing while the bridge is invisible to HomeKit. If you see "No Response" in the Home app
-while the dashboard is fine, check the logs for `Could not recover we are Down!` and
-restart:
+JmDNS can die under a running bridge — a network change on the node is enough — and when
+it does it logs `Could not recover we are Down!` and never comes back. The bridge used to
+carry on serving the dashboard and passing its liveness probe while being completely
+invisible to Apple Home.
+
+It no longer does. The bridge owns its JmDNS instance and registers for the library's
+`cannotRecoverFromIOError` callback, and separately probes every 60 seconds that multicast
+to `224.0.0.251` still works at all (three consecutive failures count as dead, so a DHCP
+renew does not trigger anything). When either fires:
+
+- `GET /healthz` turns **503** with the reason, which is what the liveness probe watches.
+- The process logs the reason and exits 70, so the pod restarts immediately — a Kubernetes
+  restart and `Restart=on-failure` under systemd both do the right thing.
+- The dashboard itself keeps serving, so the reason stays readable right up to the restart.
+
+Recovery is a restart, not an in-process repair: JmDNS does not come back, so rebuilding it
+underneath a live HAP server would be a lot of machinery for a fault whose honest answer is
+"start again".
 
 ```bash
-kubectl -n cellgate-home rollout restart deploy/cellgate-home
+kubectl -n cellgate-home logs deploy/cellgate-home --previous | grep -i "advertisement is dead"
 ```

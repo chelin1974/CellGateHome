@@ -202,6 +202,14 @@ Three more things that are easy to get wrong:
 - **The config file holds your CellGate password**, so it is mounted in from a Secret rather
   than baked into the image. Never commit a filled-in copy.
 
+One failure gets special handling. JmDNS — the mDNS responder HomeKit depends on — can die
+under a running bridge, and when it does it never comes back: the bridge keeps serving the
+dashboard while being invisible to Apple Home. The bridge now watches for that, through the
+library's own `cannotRecoverFromIOError` callback and a periodic check that multicast still
+works, and turns `GET /healthz` into a 503 with the reason. The process then exits 70 so
+whatever supervises it restarts a bridge that cannot repair itself. The dashboard keeps
+serving throughout, so the reason stays readable.
+
 `deploy/k8s/README.md` has the full walkthrough, including what a CellGate outage looks like
 from Kubernetes.
 

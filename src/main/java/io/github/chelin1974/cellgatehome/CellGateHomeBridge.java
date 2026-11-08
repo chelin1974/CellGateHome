@@ -4,6 +4,7 @@ import io.github.chelin1974.cellgatehome.cellgate.CellGateClient;
 import io.github.chelin1974.cellgatehome.cellgate.Watchman;
 import io.github.chelin1974.cellgatehome.homekit.AccessoryIds;
 import io.github.chelin1974.cellgatehome.homekit.FileAuthInfo;
+import io.github.chelin1974.cellgatehome.homekit.MdnsWatchdog;
 import io.github.chelin1974.cellgatehome.homekit.DoorbellWatcher;
 import io.github.chelin1974.cellgatehome.homekit.GateAccessory;
 import io.github.chelin1974.cellgatehome.homekit.GateDoorbell;
@@ -19,6 +20,7 @@ import io.github.hapjava.accessories.HomekitAccessory;
 import io.github.hapjava.server.HomekitAccessoryCategories;
 import io.github.hapjava.server.impl.HomekitRoot;
 import io.github.hapjava.server.impl.HomekitServer;
+import javax.jmdns.JmDNS;
 import java.io.IOException;
 import java.net.InetAddress;
 import java.nio.file.Path;
@@ -26,10 +28,12 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Consumer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -64,6 +68,9 @@ public final class CellGateHomeBridge implements AutoCloseable {
   private HomekitServer server;
   private HomekitRoot bridge;
   private DashboardServer dashboard;
+  private MdnsWatchdog mdnsWatchdog;
+  private JmDNS jmdns;
+  private volatile Consumer<String> advertisementFailureListener = reason -> {};
   private OtlpExporter exporter;
   private DoorbellWatcher doorbellWatcher;
   private volatile boolean running;
@@ -98,7 +105,13 @@ public final class CellGateHomeBridge implements AutoCloseable {
       log.warn("advertising HomeKit on {}, a loopback address your iPhone cannot reach."
           + " Set \"bindAddress\" to this machine's LAN IP.", address.getHostAddress());
     }
-    server = new HomekitServer(address, config.port());
+    // The bridge creates the JmDNS instance itself rather than letting HAP-Java do it: a
+    // delegate - the callback that fires when JmDNS gives up recovering - can only be
+    // installed on an instance we hold. HomekitServer(JmDNS, port) then advertises through
+    // it and binds HTTP to jmdns.getInetAddress(), which is this same address.
+    mdnsWatchdog = new MdnsWatchdog(address, this::onAdvertisementDead);
+    jmdns = mdnsWatchdog.createJmDns(address);
+    server = new HomekitServer(jmdns, config.port());
     bridge = server.createBridge(authInfo, config.bridgeName(), HomekitAccessoryCategories.BRIDGES,
         "CellGate", "CellGate HomeKit Bridge", "cellgate-home-bridge", "1.0.0", "1.0.0");
 
@@ -166,6 +179,8 @@ public final class CellGateHomeBridge implements AutoCloseable {
 
     DashboardModel model = new DashboardModel(dashboardGates, units, client);
     poll(); // first reading before anyone looks
+    mdnsWatchdog.schedule(scheduler, MdnsWatchdog.DEFAULT_PROBE_INTERVAL);
+
     scheduler.scheduleWithFixedDelay(this::poll,
         config.pollInterval().toSeconds(), config.pollInterval().toSeconds(), TimeUnit.SECONDS);
     log.info("reading the gate state every {}s", config.pollInterval().toSeconds());
@@ -185,7 +200,8 @@ public final class CellGateHomeBridge implements AutoCloseable {
       return;
     }
     try {
-      dashboard = new DashboardServer(config.dashboardPort(), model, config.dashboardPasscode());
+      dashboard = new DashboardServer(config.dashboardPort(), model, config.dashboardPasscode(),
+          () -> advertisementFailure().orElse(null));
       dashboard.start();
       log.info("Gate Board dashboard at http://{}:{}/{}", address.getHostAddress(), dashboard.port(),
           dashboard.switchingEnabled() ? "" : " (view-only: set dashboardPasscode to allow opening)");
@@ -291,6 +307,9 @@ public final class CellGateHomeBridge implements AutoCloseable {
     if (exporter != null) {
       exporter.close();
     }
+    if (mdnsWatchdog != null) {
+      mdnsWatchdog.stop();
+    }
     scheduler.shutdownNow();
     if (bridge != null) {
       bridge.stop();
@@ -298,8 +317,47 @@ public final class CellGateHomeBridge implements AutoCloseable {
     if (server != null) {
       server.stop();
     }
+    if (jmdns != null) {
+      try {
+        // Ours to close, since start() created it.
+        jmdns.close();
+      } catch (IOException e) {
+        log.debug("could not close JmDNS cleanly: {}", e.getMessage());
+      }
+    }
     running = false;
     terminated.countDown();
+  }
+
+  /**
+   * Why Apple Home can no longer reach this bridge, or empty while it still can.
+   *
+   * <p>Separate from whether the bridge is running, on purpose. A bridge whose responder has
+   * died is still running - still polling, still serving the dashboard - and still
+   * completely invisible to HomeKit. Treating those as one flag is what let the failure go
+   * unnoticed.
+   */
+  public Optional<String> advertisementFailure() {
+    return mdnsWatchdog == null ? Optional.empty() : mdnsWatchdog.deadReason();
+  }
+
+  /**
+   * Called once if the HomeKit advertisement dies.
+   *
+   * <p>The bridge keeps serving either way, so the dashboard can still show the reason; it
+   * is for the caller to decide what to do. Main exits non-zero so the service manager
+   * restarts a process that cannot recover on its own.
+   */
+  public void onAdvertisementFailure(Consumer<String> listener) {
+    this.advertisementFailureListener = listener == null ? reason -> {} : listener;
+  }
+
+  private void onAdvertisementDead(String reason) {
+    try {
+      advertisementFailureListener.accept(reason);
+    } catch (RuntimeException e) {
+      log.warn("the advertisement-failure listener failed: {}", e.getMessage());
+    }
   }
 
   private Path accessoryIdsFile() {
