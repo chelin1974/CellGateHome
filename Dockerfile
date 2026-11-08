@@ -1,0 +1,49 @@
+# syntax=docker/dockerfile:1
+
+# ---------------------------------------------------------------- build stage
+FROM maven:3.9-eclipse-temurin-21 AS build
+WORKDIR /src
+
+COPY pom.xml ./
+COPY src src
+
+# A BuildKit cache mount keeps the Maven repository between builds, which is both
+# simpler and more reliable than a separate dependency-resolution layer.
+RUN --mount=type=cache,target=/root/.m2 mvn -B -ntp -DskipTests package
+
+# -------------------------------------------------------------- runtime stage
+FROM eclipse-temurin:21-jre
+
+LABEL org.opencontainers.image.title="CellGate HomeKit bridge" \
+      org.opencontainers.image.description="CellGate gate and doorbell in Apple Home, with a dashboard" \
+      org.opencontainers.image.source="https://github.com/chelin1974/CellGateHome" \
+      org.opencontainers.image.licenses="MIT"
+
+RUN useradd --system --uid 10001 --create-home --home-dir /app --shell /usr/sbin/nologin cellgate \
+ && mkdir -p /data /config \
+ && chown cellgate:cellgate /data
+
+WORKDIR /app
+COPY --from=build --chown=cellgate:cellgate /src/target/cellgate-home.jar ./cellgate-home.jar
+
+USER 10001
+
+# HomeKit pairing state. It MUST outlive the container: lose it and every paired
+# controller sees a stranger where its bridge used to be, and the accessories go
+# "No Response" until the bridge is removed and re-added in the Home app.
+VOLUME ["/data"]
+
+# 8090 is the dashboard. 51829 is the HomeKit accessory port.
+#
+# Neither is the whole story: HomeKit discovery is mDNS multicast on
+# 224.0.0.251:5353, which a container on a bridge/overlay network cannot send or
+# receive. Run this with the host's network (`--network host`, or hostNetwork in
+# Kubernetes) or the Home app will never find the bridge. See deploy/k8s/README.md.
+EXPOSE 8090/tcp 51829/tcp
+
+# The config file holds the CellGate password, so it is mounted in rather than baked
+# into the image - from a Secret under Kubernetes, a bind mount under Docker.
+#
+# No shell, so the JVM is PID 1 and gets SIGTERM directly.
+ENTRYPOINT ["java", "-XX:MaxRAMPercentage=70", "-jar", "/app/cellgate-home.jar"]
+CMD ["--config", "/config/cellgate.config.json"]

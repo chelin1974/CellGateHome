@@ -1,0 +1,52 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: cellgate-home
+  labels:
+    app.kubernetes.io/part-of: home-bridges
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: cellgate-home-state
+  labels:
+    app.kubernetes.io/name: cellgate-home
+spec:
+  accessModes:
+    # One writer, which matches replicas: 1 and the Recreate strategy.
+    - ReadWriteOnce
+  resources:
+    requests:
+      # The state file is a few hundred bytes. This is the smallest most provisioners
+      # will accept.
+      storage: 64Mi
+  # Left unset so the cluster's default StorageClass is used. If your default is a
+  # node-local provisioner (local-path on k3s, for instance) the volume is pinned to
+  # whichever node first mounts it - fine here, because nodeSelector pins the pod to one
+  # node anyway. Uncomment to be explicit:
+  # storageClassName: local-path
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: cellgate-home
+  labels:
+    app.kubernetes.io/name: cellgate-home
+spec:
+  # ClusterIP is enough. Because the pod runs with hostNetwork, the dashboard is ALREADY
+  # reachable on the node itself at http://<node-ip>:8090 - no Service required for that.
+  #
+  # This Service exists for a stable in-cluster name
+  # (http://cellgate-home.cellgate-home.svc:8090) and as an Ingress backend.
+  #
+  # Do not change this to type: LoadBalancer expecting it to help HomeKit. HomeKit needs
+  # mDNS on the LAN, which no Service of any type provides - that is what hostNetwork is
+  # for, and the HomeKit port is deliberately not published here.
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: cellgate-home
+  ports:
+    - name: dashboard
+      port: 8090
+      targetPort: dashboard
+      protocol: TCP

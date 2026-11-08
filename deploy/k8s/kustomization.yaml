@@ -1,0 +1,25 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: cellgate-home
+
+resources:
+  - base.yaml       # namespace, PVC, service
+  - deployment.yaml
+  # Needs an ingress controller. Remove this line if you do not run one - with
+  # hostNetwork the dashboard is already on the node's address.
+  - ingress.yaml
+
+commonLabels:
+  app.kubernetes.io/name: cellgate-home
+  app.kubernetes.io/part-of: home-bridges
+
+images:
+  - name: ghcr.io/chelin1974/cellgate-home
+    newTag: latest
+
+# The config Secret is deliberately NOT listed here: it holds the CellGate password, so
+# create it from a local file that is never committed. See cellgate.config.k8s.example.json:
+#
+#   kubectl -n cellgate-home create secret generic cellgate-home-config \
+#     --from-file=cellgate.config.json=./cellgate.config.json

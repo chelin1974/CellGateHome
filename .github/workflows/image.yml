@@ -1,0 +1,70 @@
+name: Container image
+
+# Builds and publishes the container image to GitHub Container Registry, so a cluster can
+# pull it. Images are tagged :latest on the default branch, :<version> on a v* tag, and
+# :pr-<n> for pull requests (built but not pushed).
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+    paths-ignore:
+      - "**.md"
+      - "deploy/**"
+  pull_request:
+    paths-ignore:
+      - "**.md"
+  workflow_dispatch:
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository_owner }}/cellgate-home
+
+jobs:
+  image:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # Two architectures because a home cluster node is as likely to be a Raspberry Pi
+      # (arm64) as a mini PC (amd64). arm64 is emulated here, which makes the build slow
+      # but means one tag works on either node.
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to the registry
+        # Skipped for pull requests from forks, which have no package-write token.
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Tags and labels
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=ref,event=pr
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=sha,format=long
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          # Keeps the Maven dependency cache between runs; without it every build
+          # re-downloads the world.
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

@@ -1,0 +1,24 @@
+{
+  "_comment": "Config for running in Kubernetes or Docker. Copy to cellgate.config.json, fill it in, and load it as a Secret - never commit the filled-in copy. See deploy/k8s/README.md.",
+
+  "email": "you@example.com",
+  "password": "YOUR_CELLGATE_PASSWORD",
+
+  "bridgeName": "CellGate",
+  "port": 51829,
+
+  "dashboardPort": 8090,
+  "dashboardPasscode": "",
+
+  "_bindAddress": "The LAN address HomeKit is advertised on. Under hostNetwork this is the node's own IP; set it explicitly if the Home app cannot find the bridge, since the auto-pick can choose an interface your iPhone cannot reach. The pod is pinned to one node by nodeSelector, so a fixed value here is safe.",
+  "bindAddress": "",
+
+  "_storagePath": "Must point at the mounted volume, or HomeKit pairing state is lost on every restart and every controller has to re-pair.",
+  "storagePath": "/data/cellgate-home.state.json",
+
+  "prometheusUrl": "",
+  "pollIntervalSeconds": 20,
+
+  "doorbell": true,
+  "doorbellRingEvents": ["Response Picture"]
+}
