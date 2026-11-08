@@ -1,0 +1,12 @@
+# Loads the dashboards in grafana/dashboards when Grafana starts.
+#
+# Only CellGateHome's dashboards live here. The DaikinHome and SpanHome bridges provision
+# their own, in their own repositories, so each Grafana shows exactly one bridge.
+apiVersion: 1
+providers:
+  - name: CellGate Home
+    folder: ""
+    type: file
+    allowUiUpdates: true
+    options:
+      path: /var/lib/grafana/dashboards

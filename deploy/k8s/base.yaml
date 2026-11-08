@@ -4,6 +4,18 @@ metadata:
   name: cellgate-home
   labels:
     app.kubernetes.io/part-of: home-bridges
+
+    # This bridge needs hostNetwork, which the "baseline" and "restricted" Pod Security
+    # Standards both forbid. If your cluster enforces either by default, the pod is
+    # rejected outright with "violates PodSecurity" and never starts - so the namespace
+    # opts in to "privileged" explicitly rather than depending on the cluster default.
+    #
+    # The pod is not otherwise privileged: it runs as UID 10001, drops all capabilities,
+    # has a read-only root filesystem and cannot escalate. hostNetwork is the single
+    # exemption it needs, and it needs it because mDNS cannot work without it.
+    pod-security.kubernetes.io/enforce: privileged
+    pod-security.kubernetes.io/audit: baseline
+    pod-security.kubernetes.io/warn: baseline
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim

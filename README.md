@@ -263,8 +263,25 @@ the camera from an automation, to refresh it.
 ## History with Prometheus (OpenTelemetry)
 
 Set `prometheusUrl` to a Prometheus 3 started with `--web.enable-otlp-receiver`, and the bridge
-sends the gate state every 60 seconds as OpenTelemetry metrics. If you run SpanHome, its
-`docker compose up -d` already runs one on `http://localhost:9090`.
+sends the gate state every 60 seconds as OpenTelemetry metrics.
+
+This repository ships its own stack rather than borrowing another bridge's: `prometheus.yml`,
+and Grafana provisioning plus a dashboard under `grafana/`. Nothing is shared with the
+DaikinHome or SpanHome bridges, so this one runs with or without them, and its Grafana shows
+only this gate.
+
+```bash
+docker compose --profile metrics up -d    # bridge + its own Prometheus and Grafana
+```
+
+Then set `"prometheusUrl": "http://localhost:9092"` below and open Grafana on
+<http://localhost:3002>. The ports are allocated so all three bridges can run side by side:
+
+| Bridge | Prometheus | Grafana |
+| --- | --- | --- |
+| SpanHome | 9090 | 3000 |
+| DaikinHome | 9091 | 3001 |
+| CellGateHome | 9092 | 3002 |
 
 ```json
 "prometheusUrl": "http://localhost:9090"

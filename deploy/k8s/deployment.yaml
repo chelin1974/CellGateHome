@@ -54,6 +54,13 @@ spec:
       nodeSelector:
         homekit: "true"
 
+      # Packages published to ghcr.io are PRIVATE by default, and a private package gives
+      # ImagePullBackOff with "denied". Either make the package public once (Packages ->
+      # the package -> Package settings -> Change visibility), or create a pull secret and
+      # uncomment this. See deploy/k8s/README.md.
+      # imagePullSecrets:
+      #   - name: ghcr-pull
+
       securityContext:
         runAsNonRoot: true
         runAsUser: 10001
