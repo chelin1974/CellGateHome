@@ -275,16 +275,18 @@ docker compose --profile metrics up -d    # bridge + its own Prometheus and Graf
 ```
 
 Then set `"prometheusUrl": "http://localhost:9092"` below and open Grafana on
-<http://localhost:3002>. The ports are allocated so all three bridges can run side by side:
+<http://localhost:3002>. This bridge's ports are its own, so its stack runs alongside either
+of the others; SpanHome and DaikinHome serve theirs on the same pair, so run only one of those
+two:
 
 | Bridge | Prometheus | Grafana |
 | --- | --- | --- |
 | SpanHome | 9090 | 3000 |
-| DaikinHome | 9091 | 3001 |
+| DaikinHome | 9090 | 3000 |
 | CellGateHome | 9092 | 3002 |
 
 ```json
-"prometheusUrl": "http://localhost:9090"
+"prometheusUrl": "http://localhost:9092"
 ```
 
 | In Prometheus | What it is | Labels |

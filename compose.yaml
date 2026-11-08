@@ -13,12 +13,15 @@
 #
 # Everything here is CellGateHome's own: its own Prometheus config, its own Grafana
 # provisioning, its own volumes, and its own ports. It shares nothing with the DaikinHome
-# or SpanHome bridges, so it runs with or without them. The ports are allocated so all
-# three can also run side by side on one host:
+# or SpanHome bridges, so it runs with or without them. Its ports are its own, so this stack
+# runs alongside either of theirs:
 #
 #   SpanHome      Prometheus 9090   Grafana 3000
-#   DaikinHome    Prometheus 9091   Grafana 3001
+#   DaikinHome    Prometheus 9090   Grafana 3000
 #   CellGateHome  Prometheus 9092   Grafana 3002
+#
+# SpanHome and DaikinHome serve theirs on the same pair, so run only one of those two and
+# point both of those bridges at it.
 #
 # The compose project name keeps this stack's containers and volumes separate from the
 # others even though the service names are similar.
