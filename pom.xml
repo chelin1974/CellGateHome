@@ -16,7 +16,12 @@
   </description>
 
   <properties>
-    <maven.compiler.release>21</maven.compiler.release>
+    <!--
+      Java 27. Not an LTS - it is a six-month release, superseded by 28 in March 2027 - so
+      this tracks the current JDK rather than a long-supported one, by choice. The container
+      image is on the same version; keep the two in step.
+    -->
+    <maven.compiler.release>27</maven.compiler.release>
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
 
     <hap.version>2.0.7</hap.version>
