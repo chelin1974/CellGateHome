@@ -5,6 +5,8 @@ target/
 # the config holds your CellGate password and the state file holds the HomeKit setup code.
 cellgate.config.json
 cellgate-home.state.json
+# What compose.yaml bind-mounts at /data: the pairing state the container writes.
+data/
 cellgate-home.accessories.json
 cellgate-home.layout.json
 cellgate-home.log

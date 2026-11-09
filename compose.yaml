@@ -47,8 +47,12 @@ services:
       # Holds the CellGate password, so it is mounted rather than baked into the image.
       # Set "storagePath": "/data/cellgate-home.state.json" inside it.
       - ./cellgate.config.json:/config/cellgate.config.json:ro
-      # HomeKit pairing state. Losing this un-pairs every controller.
-      - cellgate-state:/data
+      # HomeKit pairing state, on a bind mount rather than a named volume so it is an
+      # ordinary file you can see, back up, and share with a run outside Docker. A named
+      # volume kept it inside Docker's own storage, which meant a bridge already paired from
+      # the command line looked brand new to the container, and the Home app was asked to
+      # pair all over again. Losing this file un-pairs every controller.
+      - ./data:/data
 
     healthcheck:
       # /healthz turns 503 once the mDNS responder has died, which is the failure that
@@ -94,6 +98,5 @@ services:
     restart: unless-stopped
 
 volumes:
-  cellgate-state:
   prometheus-data:
   grafana-data:
