@@ -89,7 +89,23 @@ public final class CellGateHomeBridge implements AutoCloseable {
     this.client = client;
   }
 
+  /**
+   * Says where every file the bridge writes is going, once, at startup.
+   *
+   * <p>Three files land somewhere decided by a data directory, an optional override and a
+   * default - enough moving parts that "where is my pairing state?" should be answerable by
+   * reading the log, and in a container, by checking these are on the mounted volume rather
+   * than the writable layer.
+   */
+  private void logWrittenPaths() {
+    log.info("writing to {}", config.dataDirectory().toAbsolutePath());
+    log.info("  pairing state: {}", config.storagePath().toAbsolutePath());
+    log.info("  accessory IDs: {}", accessoryIdsFile());
+    log.info("  layout number: {}", layoutFile());
+  }
+
   public synchronized void start() throws IOException {
+    logWrittenPaths();
     if (running) {
       return;
     }
@@ -394,9 +410,15 @@ public final class CellGateHomeBridge implements AutoCloseable {
     return sibling("cellgate-home.layout.json");
   }
 
+  /**
+   * A file in the data directory.
+   *
+   * <p>This used to hang off {@code storagePath}'s parent, which meant pointing the pairing
+   * state somewhere else quietly took the accessory IDs and the layout number with it. They
+   * follow {@code dataDirectory} now, so the three move together or not at all.
+   */
   private Path sibling(String name) {
-    Path parent = config.storagePath().toAbsolutePath().getParent();
-    return parent == null ? Path.of(name) : parent.resolve(name);
+    return config.dataDirectory().toAbsolutePath().resolve(name);
   }
 
   /** For the {@code --list} command: sign in and read the account without touching HomeKit. */
