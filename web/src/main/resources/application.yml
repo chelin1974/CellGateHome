@@ -1,0 +1,44 @@
+cellgate:
+  # The configuration file. Left blank, data/cellgate.config.json is used when it exists and
+  # cellgate.config.json in the working directory otherwise. The data folder is looked at
+  # first because everything this bridge writes - pairing state, the panel credentials earned
+  # at registration, accessory IDs, the layout number - is resolved relative to this file, so
+  # keeping it with them means one directory to mount and one directory to back up.
+  config-file: ${CELLGATE_CONFIG_FILE:}
+
+server:
+  # The same port the gate dashboard has always been on. The bridge's own small HTTP
+  # server stands down when this service runs, so only one of the two binds it; override with
+  # SERVER_PORT if 8090 is taken, and note that "dashboardPort" in the config file no longer
+  # decides where the page is served when you run this flavour.
+  port: ${SERVER_PORT:8090}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      show-details: always
+      # Adds /actuator/health/liveness and /actuator/health/readiness. Spring enables these
+      # automatically when it detects Kubernetes; setting it explicitly means the same probe
+      # URLs work under Docker and on bare metal too.
+      #
+      # These groups cover the JVM and the HTTP listener only - not the cellgateBridge indicator.
+      # That is deliberate: /actuator/health reports DOWN while the CellGate cloud is unreachable, so
+      # pointing a liveness probe at it would restart the container in a loop every time the
+      # panel reboots, and pointing a readiness probe at it would pull the dashboard out of
+      # service exactly when you need it to tell you what is wrong.
+      #
+      # The one fault that *does* break liveness is the HomeKit advertisement dying, which
+      # BridgeLifecycle reports by publishing LivenessState.BROKEN. That is not recoverable in
+      # process, so a restart is the only fix.
+      probes:
+        enabled: true
+
+logging:
+  level:
+    io.github.chelin1974.cellgatehome: INFO
+    # HAP-Java logs every HomeKit frame at INFO, which buries everything else.
+    io.github.hapjava: WARN

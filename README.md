@@ -68,6 +68,17 @@ remotely from the app (that leaves no snapshot), so it means "someone is physica
 mvn package
 ```
 
+That produces two jars:
+
+| Jar | What it is |
+| --- | --- |
+| `cli/target/cellgate-home.jar` (~9 MB) | the plain runnable jar: HomeKit, the gate dashboard on its own small HTTP server, no Spring. This is what launchd and systemd run. |
+| `web/target/cellgate-home-web.jar` (~29 MB) | the same bridge inside Spring Boot: the dashboard served by Tomcat, a REST API, and actuator health with liveness and readiness groups. This is what the container runs. |
+
+Both read the same `cellgate.config.json` and write the same files, so you can swap between
+them - but run only one at a time, since they would both advertise the same HomeKit bridge and
+both write the same pairing state.
+
 **2. Configure.** Copy the example and fill in your CellGate login:
 
 ```bash
@@ -79,7 +90,7 @@ $EDITOR cellgate.config.json
 **3. Check it can see your gate.**
 
 ```bash
-java -jar target/cellgate-home.jar --config cellgate.config.json --list
+java -jar cli/target/cellgate-home.jar --config cellgate.config.json --list
 ```
 
 ```
@@ -92,7 +103,7 @@ Front gate (WTM-S2) WTM-EVO, serial 0C:11:...
 **4. Start it and pair.**
 
 ```bash
-java -jar target/cellgate-home.jar --config cellgate.config.json
+java -jar cli/target/cellgate-home.jar --config cellgate.config.json
 ```
 
 It runs in that terminal until you press **Ctrl+C**, and prints the dashboard address and a
@@ -118,7 +129,7 @@ cat > ~/Library/LaunchAgents/io.github.chelin1974.cellgatehome.plist <<EOF
   <key>Label</key><string>io.github.chelin1974.cellgatehome</string>
   <key>ProgramArguments</key>
   <array>
-    <string>$JAVA</string><string>-jar</string><string>$DIR/target/cellgate-home.jar</string>
+    <string>$JAVA</string><string>-jar</string><string>$DIR/cli/target/cellgate-home.jar</string>
     <string>--config</string><string>$DIR/cellgate.config.json</string>
   </array>
   <key>WorkingDirectory</key><string>$DIR</string>
@@ -148,7 +159,7 @@ from `/opt/cellgate-home`.
 sudo apt install openjdk-27-jre-headless
 sudo useradd --system --home-dir /opt/cellgate-home --shell /usr/sbin/nologin cellgate
 sudo mkdir -p /opt/cellgate-home
-sudo cp target/cellgate-home.jar cellgate.config.json /opt/cellgate-home/
+sudo cp cli/target/cellgate-home.jar cellgate.config.json /opt/cellgate-home/
 sudo cp cellgate-home.state.json /opt/cellgate-home/ 2>/dev/null || true   # if already paired
 sudo chown -R cellgate: /opt/cellgate-home && sudo chmod 700 /opt/cellgate-home
 sudo cp cellgate-home.service /etc/systemd/system/
