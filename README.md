@@ -172,9 +172,51 @@ A `Dockerfile` builds the bridge, `compose.yaml` runs it under plain Docker, and
 
 ```bash
 cp cellgate.config.k8s.example.json cellgate.config.json   # then fill it in
+mkdir -p data                               # where the pairing state lives
 docker compose up -d
 kubectl apply -k deploy/k8s                 # then create the Secret - see deploy/k8s/README.md
 ```
+
+### The pairing state is shared with the host
+
+`compose.yaml` bind-mounts `./data` at `/data`, and the config's `storagePath` should read
+`/data/cellgate-home.state.json`, so the pairing state is an ordinary file you can see, back
+up and reuse. It used to be a named Docker volume, which meant a bridge you had already added
+to the Home app from the command line looked brand new to the container, and you were asked to
+pair it a second time.
+
+**If you paired outside Docker and want the container to keep that pairing**, move the state
+file in before the first `docker compose up`:
+
+```bash
+mkdir -p data
+mv cellgate-home.state.json data/
+```
+
+**If you already had the container paired on the old named volume**, copy it out rather than
+starting over:
+
+```bash
+docker compose down
+mkdir -p data
+docker run --rm -v cellgate-home_cellgate-state:/from -v "$PWD/data":/to \
+  alpine cp /from/cellgate-home.state.json /to/
+docker compose up -d
+docker volume rm cellgate-home_cellgate-state   # once you have checked it still pairs
+```
+
+Only ever run **one** of them at a time. Two bridges sharing this file both advertise the same
+HomeKit identity and both write the same state, which shows up as accessories flapping to "No
+Response".
+
+On a Linux host the container runs as UID 10001 and the bind-mounted directory has to be
+writable by it, or the bridge reports `Permission denied` on that path:
+
+```bash
+mkdir -p data && sudo chown 10001:10001 data
+```
+
+Docker Desktop on a Mac maps ownership for you, so this is not needed there.
 
 **One thing decides the shape of all of it: HomeKit needs mDNS multicast on your LAN, and
 a container on a bridge or overlay network cannot do multicast.** Discovery and resolution

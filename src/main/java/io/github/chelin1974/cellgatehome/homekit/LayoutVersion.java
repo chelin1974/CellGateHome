@@ -10,6 +10,7 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.security.MessageDigest;
 import java.util.Comparator;
 import java.util.HexFormat;
@@ -54,10 +55,28 @@ public final class LayoutVersion {
     // iOS reload it once, and is harmless for a new bridge.
     state.configurationIndex = first ? 2 : (state.configurationIndex >= MAX ? 1 : state.configurationIndex + 1);
     state.fingerprint = fingerprint;
+    // Via a temporary file and an atomic move, like AccessoryIds in this package: a write
+    // that fails half way would otherwise leave a truncated file. read() already recovers
+    // from that by starting the count again, which costs one needless accessory reload in
+    // iOS, so this is tidiness rather than a fix for data loss.
+    Path parent = file.toAbsolutePath().getParent();
+    Path temporary = null;
     try {
-      Files.writeString(file, MAPPER.writeValueAsString(state));
+      temporary = Files.createTempFile(parent, ".cellgate-home.layout", ".tmp");
+      Files.writeString(temporary, MAPPER.writeValueAsString(state));
+      Files.move(
+          temporary, file, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+      temporary = null;
     } catch (IOException | JacksonException e) {
       log.warn("could not save {}: {}", file, e.getMessage());
+    } finally {
+      if (temporary != null) {
+        try {
+          Files.deleteIfExists(temporary);
+        } catch (IOException suppressed) {
+          log.debug("could not remove {}", temporary, suppressed);
+        }
+      }
     }
     if (first) {
       log.info("HomeKit configuration {} (first layout recorded; iOS reloads the accessories once)", state.configurationIndex);

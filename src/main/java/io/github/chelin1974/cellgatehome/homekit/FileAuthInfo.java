@@ -10,6 +10,7 @@ import java.io.UncheckedIOException;
 import java.math.BigInteger;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.security.InvalidAlgorithmParameterException;
 import java.util.Base64;
 import java.util.Collection;
@@ -62,7 +63,7 @@ public final class FileAuthInfo implements HomekitAuthInfo {
   /** Loads the pairing state, generating and saving a fresh identity on first run. */
   public static FileAuthInfo loadOrCreate(Path file) {
     try {
-      if (Files.isReadable(file)) {
+      if (Files.isReadable(file) && !isEmpty(file)) {
         State existing = MAPPER.readValue(Files.readString(file), State.class);
         if (existing.users == null) {
           existing.users = new LinkedHashMap<>();
@@ -73,6 +74,21 @@ public final class FileAuthInfo implements HomekitAuthInfo {
             file,
             existing.users.size());
         return info;
+      }
+
+      if (Files.exists(file)) {
+        // An empty file is what a write that failed part-way leaves behind - most often a
+        // full disk, since the old save() truncated before writing. It holds no pairings, so
+        // there is nothing to lose by starting over, and refusing to start instead left the
+        // bridge stuck in a retry loop over a file it had created itself.
+        //
+        // Deliberately only for an EMPTY file. Content that is present but unparseable may
+        // be a recoverable file with real pairings in it, and regenerating the identity over
+        // the top of that would silently un-pair every controller.
+        log.warn(
+            "{} is empty - generating a new HomeKit identity. If controllers were paired "
+                + "before, they will need to be re-added in the Home app.",
+            file);
       }
 
       State fresh = new State();
@@ -159,25 +175,62 @@ public final class FileAuthInfo implements HomekitAuthInfo {
     return !state.users.isEmpty();
   }
 
+  /** True for a file that exists but holds nothing, or only whitespace. */
+  private static boolean isEmpty(Path file) throws IOException {
+    return Files.size(file) == 0L || Files.readString(file).isBlank();
+  }
+
+  /**
+   * Writes the state to a temporary file beside the real one and moves it into place.
+   *
+   * <p>Writing the file directly truncated it first, so a write that failed half way - a
+   * full disk is the usual way - replaced a good file with an empty or partial one and took
+   * every pairing with it. That is the one failure this class exists to prevent: losing this
+   * file means every controller sees a stranger where its bridge used to be.
+   *
+   * <p>A move within a directory is atomic, so the real file only ever holds a complete
+   * document: either the previous one or the new one, never a half of either. The temporary
+   * file is given owner-only permissions before the move rather than after, so the state is
+   * never briefly world-readable, and is cleaned up if anything fails.
+   */
   private void save() {
+    Path parent = file.toAbsolutePath().getParent();
+    Path temporary = null;
     try {
-      Path parent = file.toAbsolutePath().getParent();
       if (parent != null) {
         Files.createDirectories(parent);
       }
-      Files.writeString(file, MAPPER.writerWithDefaultPrettyPrinter().writeValueAsString(state));
-      restrictPermissions();
+      String document = MAPPER.writerWithDefaultPrettyPrinter().writeValueAsString(state);
+
+      // In the same directory, so the move cannot cross a filesystem boundary and fall back
+      // to a copy - which would reintroduce exactly the partial write this avoids.
+      temporary = Files.createTempFile(parent, ".cellgate-home.state", ".tmp");
+      Files.writeString(temporary, document);
+      restrictPermissions(temporary);
+      Files.move(
+          temporary, file, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+      temporary = null;
     } catch (IOException e) {
       throw new UncheckedIOException("could not save HomeKit pairing state to " + file, e);
     } catch (JacksonException e) {
-      throw new UncheckedIOException("could not save HomeKit pairing state to " + file, new IOException(e.getMessage(), e));
+      throw new UncheckedIOException(
+          "could not save HomeKit pairing state to " + file, new IOException(e.getMessage(), e));
+    } finally {
+      if (temporary != null) {
+        try {
+          Files.deleteIfExists(temporary);
+        } catch (IOException suppressed) {
+          log.debug("could not remove the temporary state file {}", temporary, suppressed);
+        }
+      }
     }
   }
 
   /** Best effort: POSIX only, and silently skipped elsewhere (e.g. Windows). */
-  private void restrictPermissions() {
+  private static void restrictPermissions(Path target) {
     try {
-      Files.setPosixFilePermissions(file, java.nio.file.attribute.PosixFilePermissions.fromString("rw-------"));
+      Files.setPosixFilePermissions(
+          target, java.nio.file.attribute.PosixFilePermissions.fromString("rw-------"));
     } catch (UnsupportedOperationException | IOException ignored) {
       // Not a POSIX filesystem, or the file was removed underneath us.
     }

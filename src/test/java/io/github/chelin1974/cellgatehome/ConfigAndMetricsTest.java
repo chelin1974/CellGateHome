@@ -32,6 +32,47 @@ class ConfigAndMetricsTest {
   }
 
   @Test
+  @DisplayName("an absolute storagePath is taken as given")
+  void absoluteStoragePath() throws Exception {
+    CellGateConfig c =
+        config(
+            "{\"email\":\"a@b.com\",\"password\":\"x\","
+                + "\"storagePath\":\"/data/cellgate-home.state.json\"}");
+
+    assertEquals(Path.of("/data/cellgate-home.state.json"), c.storagePath());
+  }
+
+  /**
+   * The rule shared with the SpanHome and DaikinHome bridges. This used to resolve against the
+   * process working directory, so the same config meant different files depending on where the
+   * bridge was started from - and losing track of that file un-pairs every controller.
+   */
+  @Test
+  @DisplayName("a relative storagePath is resolved against the config file's directory")
+  void relativeStoragePathResolvesAgainstTheConfigDirectory() throws Exception {
+    Path directory = Files.createTempDirectory("cg");
+    Path file = directory.resolve("cellgate.config.json");
+    Files.writeString(
+        file, "{\"email\":\"a@b.com\",\"password\":\"x\",\"storagePath\":\"data/state.json\"}");
+
+    CellGateConfig c = CellGateConfig.load(file);
+
+    assertEquals(directory.resolve("data/state.json"), c.storagePath());
+  }
+
+  @Test
+  @DisplayName("with no storagePath the state file sits beside the config file")
+  void defaultStoragePath() throws Exception {
+    Path directory = Files.createTempDirectory("cg");
+    Path file = directory.resolve("cellgate.config.json");
+    Files.writeString(file, "{\"email\":\"a@b.com\",\"password\":\"x\"}");
+
+    CellGateConfig c = CellGateConfig.load(file);
+
+    assertEquals(directory.resolve("cellgate-home.state.json"), c.storagePath());
+  }
+
+  @Test
   @DisplayName("email and password are required; prometheusUrl turns on the OTLP endpoint")
   void config() throws Exception {
     assertThrows(ConfigException.class, () -> config("{}"));
