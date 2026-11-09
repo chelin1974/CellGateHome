@@ -46,16 +46,13 @@ services:
     environment:
       # The Spring Boot flavour reads the same cellgate.config.json the CLI reads; this points
       # it at the copy on the mounted data directory rather than one beside the jar.
-      CELLGATE_CONFIG_FILE: /config/cellgate.config.json
-      # Every file the bridge writes goes here, on the bind mount below. Set explicitly rather
-      # than left to default to the config file's directory, which is the read-only /config
-      # mount - so this is what guarantees the pairing state is on the volume.
+      CELLGATE_CONFIG_FILE: /data/cellgate.config.json
+      # Every file the bridge writes goes here, on the bind mount below. The config now sits in
+      # /data too, so this is where they would land anyway - set explicitly so it is a declared
+      # fact rather than a consequence of where the config happens to be.
       CELLGATE_DATA_DIRECTORY: /data
 
     volumes:
-      # Holds the CellGate password, so it is mounted rather than baked into the image.
-      # Set "storagePath": "/data/cellgate-home.state.json" inside it.
-      - ./cellgate.config.json:/config/cellgate.config.json:ro
       # HomeKit pairing state, on a bind mount rather than a named volume so it is an
       # ordinary file you can see, back up, and share with a run outside Docker. A named
       # volume kept it inside Docker's own storage, which meant a bridge already paired from
