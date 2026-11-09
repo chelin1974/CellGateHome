@@ -5,7 +5,9 @@ FROM maven:3.10-eclipse-temurin-27 AS build
 WORKDIR /src
 
 COPY pom.xml ./
-COPY src src
+COPY core core
+COPY cli cli
+COPY web web
 
 # A BuildKit cache mount keeps the Maven repository between builds, which is both
 # simpler and more reliable than a separate dependency-resolution layer.
@@ -24,7 +26,7 @@ RUN useradd --system --uid 10001 --create-home --home-dir /app --shell /usr/sbin
  && chown cellgate:cellgate /data
 
 WORKDIR /app
-COPY --from=build --chown=cellgate:cellgate /src/target/cellgate-home.jar ./cellgate-home.jar
+COPY --from=build --chown=cellgate:cellgate /src/web/target/cellgate-home-web.jar ./cellgate-home-web.jar
 
 USER 10001
 
@@ -45,5 +47,9 @@ EXPOSE 8090/tcp 51829/tcp
 # into the image - from a Secret under Kubernetes, a bind mount under Docker.
 #
 # No shell, so the JVM is PID 1 and gets SIGTERM directly.
-ENTRYPOINT ["java", "-XX:MaxRAMPercentage=70", "-jar", "/app/cellgate-home.jar"]
-CMD ["--config", "/config/cellgate.config.json"]
+ENTRYPOINT ["java", "-XX:MaxRAMPercentage=70", "-jar", "/app/cellgate-home-web.jar"]
+# Where the config is in this image. The CLI took "--config <path>"; the Spring Boot flavour
+# takes a property, and would have parsed that flag as an unknown option and ignored it -
+# leaving the bridge looking for a config beside the jar. An ENV rather than a CMD so compose
+# and Kubernetes inherit it without each having to pass it.
+ENV CELLGATE_CONFIG_FILE=/config/cellgate.config.json

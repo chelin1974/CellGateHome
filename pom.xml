@@ -5,15 +5,24 @@
   <modelVersion>4.0.0</modelVersion>
 
   <groupId>io.github.chelin1974</groupId>
-  <artifactId>cellgate-home</artifactId>
+  <artifactId>cellgate-home-parent</artifactId>
   <version>1.0.0</version>
-  <packaging>jar</packaging>
+  <packaging>pom</packaging>
 
   <name>CellGate HomeKit</name>
   <description>
     Puts a CellGate (Watchman) gate and camera into Apple Home over the HomeKit Accessory
     Protocol, and serves a small web dashboard. Talks to CellGate's cloud as its portal does.
   </description>
+
+  <modules>
+    <!-- The bridge itself: the Watchman units, HomeKit accessories, metrics, the dashboard model. -->
+    <module>core</module>
+    <!-- A plain runnable jar. Smallest thing that works, and what systemd runs. -->
+    <module>cli</module>
+    <!-- The same bridge inside a Spring Boot service, with a REST API and health checks. -->
+    <module>web</module>
+  </modules>
 
   <properties>
     <!--
@@ -23,6 +32,13 @@
     -->
     <maven.compiler.release>27</maven.compiler.release>
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+    <!--
+      Keeps parameter names in the bytecode. Spring needs them to bind @PathVariable and
+      @RequestParam without repeating the name in the annotation; without this every path
+      variable fails at runtime with "Name for argument of type [String] not specified".
+      spring-boot-starter-parent sets this for you, and this build does not use it.
+    -->
+    <maven.compiler.parameters>true</maven.compiler.parameters>
 
     <hap.version>2.0.7</hap.version>
     <jackson.version>3.3.0</jackson.version>
@@ -30,6 +46,7 @@
     <junit.version>5.11.4</junit.version>
     <!-- HAP-Java brings netty 4.1.72; pinned to a patched 4.1 release (see dependencyManagement). -->
     <netty.version>4.1.140.Final</netty.version>
+    <spring-boot.version>4.1.2</spring-boot.version>
   </properties>
 
   <dependencyManagement>
@@ -46,88 +63,68 @@
         <type>pom</type>
         <scope>import</scope>
       </dependency>
+
+      <dependency>
+        <groupId>io.github.chelin1974</groupId>
+        <artifactId>cellgate-home-core</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+
+      <dependency>
+        <groupId>io.github.hap-java</groupId>
+        <artifactId>hap</artifactId>
+        <version>${hap.version}</version>
+      </dependency>
+
+      <!--
+        Jackson 3 (tools.jackson packages; the annotations stay in com.fasterxml.jackson.annotation).
+      -->
+      <dependency>
+        <groupId>tools.jackson</groupId>
+        <artifactId>jackson-bom</artifactId>
+        <version>${jackson.version}</version>
+        <type>pom</type>
+        <scope>import</scope>
+      </dependency>
+
+      <!--
+        Pinned deliberately. HAP-Java depends on slf4j-api 1.7.x, and if that version wins the
+        classpath, SLF4J 2's ServiceLoader binding is never found and every log line is dropped.
+      -->
+      <dependency>
+        <groupId>org.slf4j</groupId>
+        <artifactId>slf4j-api</artifactId>
+        <version>${slf4j.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>org.slf4j</groupId>
+        <artifactId>slf4j-simple</artifactId>
+        <version>${slf4j.version}</version>
+      </dependency>
+
+      <dependency>
+        <groupId>org.junit.jupiter</groupId>
+        <artifactId>junit-jupiter</artifactId>
+        <version>${junit.version}</version>
+        <scope>test</scope>
+      </dependency>
     </dependencies>
   </dependencyManagement>
 
-  <dependencies>
-    <dependency>
-      <groupId>io.github.hap-java</groupId>
-      <artifactId>hap</artifactId>
-      <version>${hap.version}</version>
-    </dependency>
-
-
-    <!-- Jackson 3: tools.jackson packages; the annotations stay in com.fasterxml.jackson.annotation. -->
-    <dependency>
-      <groupId>tools.jackson.core</groupId>
-      <artifactId>jackson-databind</artifactId>
-      <version>${jackson.version}</version>
-    </dependency>
-
-    <!--
-      Pinned deliberately. HAP-Java depends on slf4j-api 1.7.x, and if that version wins the
-      classpath, SLF4J 2's ServiceLoader binding is never found and every log line is dropped.
-    -->
-    <dependency>
-      <groupId>org.slf4j</groupId>
-      <artifactId>slf4j-api</artifactId>
-      <version>${slf4j.version}</version>
-    </dependency>
-    <dependency>
-      <groupId>org.slf4j</groupId>
-      <artifactId>slf4j-simple</artifactId>
-      <version>${slf4j.version}</version>
-    </dependency>
-
-    <dependency>
-      <groupId>org.junit.jupiter</groupId>
-      <artifactId>junit-jupiter</artifactId>
-      <version>${junit.version}</version>
-      <scope>test</scope>
-    </dependency>
-  </dependencies>
-
   <build>
-    <finalName>cellgate-home</finalName>
-    <plugins>
-      <plugin>
-        <groupId>org.apache.maven.plugins</groupId>
-        <artifactId>maven-surefire-plugin</artifactId>
-        <version>3.5.2</version>
-      </plugin>
-
-      <!-- Single runnable jar: java -jar target/cellgate-home.jar -->
-      <plugin>
-        <groupId>org.apache.maven.plugins</groupId>
-        <artifactId>maven-shade-plugin</artifactId>
-        <version>3.6.0</version>
-        <executions>
-          <execution>
-            <phase>package</phase>
-            <goals><goal>shade</goal></goals>
-            <configuration>
-              <createDependencyReducedPom>false</createDependencyReducedPom>
-              <transformers>
-                <transformer implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
-                  <mainClass>io.github.chelin1974.cellgatehome.Main</mainClass>
-                </transformer>
-                <transformer implementation="org.apache.maven.plugins.shade.resource.ServicesResourceTransformer"/>
-              </transformers>
-              <filters>
-                <filter>
-                  <artifact>*:*</artifact>
-                  <excludes>
-                    <exclude>META-INF/*.SF</exclude>
-                    <exclude>META-INF/*.DSA</exclude>
-                    <exclude>META-INF/*.RSA</exclude>
-                    <exclude>module-info.class</exclude>
-                  </excludes>
-                </filter>
-              </filters>
-            </configuration>
-          </execution>
-        </executions>
-      </plugin>
-    </plugins>
+    <pluginManagement>
+      <plugins>
+        <plugin>
+          <groupId>org.apache.maven.plugins</groupId>
+          <artifactId>maven-surefire-plugin</artifactId>
+          <version>3.5.2</version>
+        </plugin>
+        <plugin>
+          <groupId>org.apache.maven.plugins</groupId>
+          <artifactId>maven-shade-plugin</artifactId>
+          <version>3.6.0</version>
+        </plugin>
+      </plugins>
+    </pluginManagement>
   </build>
 </project>

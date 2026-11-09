@@ -43,6 +43,11 @@ services:
     # so this will not work there. Run it on the Linux box that is on your network.
     network_mode: host
 
+    environment:
+      # The Spring Boot flavour reads the same cellgate.config.json the CLI reads; this points
+      # it at the copy on the mounted data directory rather than one beside the jar.
+      CELLGATE_CONFIG_FILE: /config/cellgate.config.json
+
     volumes:
       # Holds the CellGate password, so it is mounted rather than baked into the image.
       # Set "storagePath": "/data/cellgate-home.state.json" inside it.
@@ -53,6 +58,13 @@ services:
       # the command line looked brand new to the container, and the Home app was asked to
       # pair all over again. Losing this file un-pairs every controller.
       - ./data:/data
+
+    # Tomcat refuses to start without a writable temp dir, and on the container's writable
+    # layer that is a disk write - so a full Docker disk stops the bridge booting at all, with a
+    # stack trace that points at Tomcat rather than at the disk. In RAM it cannot be filled by
+    # anything else, and nothing here needs to survive a restart.
+    tmpfs:
+      - /tmp:size=64m
 
     healthcheck:
       # /healthz turns 503 once the mDNS responder has died, which is the failure that
