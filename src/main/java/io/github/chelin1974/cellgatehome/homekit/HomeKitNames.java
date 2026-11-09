@@ -10,7 +10,8 @@ import java.util.Set;
  *
  * <p>Recent iOS versions reject accessory names that do not start and end with a letter or
  * number, or that contain characters outside letters, numbers, spaces, apostrophes, periods,
- * commas and hyphens. CellGate lets you name a gate anything, so names are cleaned here.
+ * commas and hyphens. The device's own app lets you name things freely, so names are
+ * cleaned here.
  */
 public final class HomeKitNames {
 
@@ -44,8 +45,13 @@ public final class HomeKitNames {
   }
 
   /**
-   * HomeKit wants a firmware revision of the form {@code x.y.z}. Keep the first three numbers
-   * of whatever the device reports, e.g. {@code v2.4.17-b3} becomes {@code 2.4.17}.
+   * HomeKit wants a firmware revision of the form {@code x.y.z}, and devices rarely oblige.
+   *
+   * <p>This keeps the first three runs of digits in whatever the device reports, padding with
+   * zeros when there are fewer than three: {@code v2.4.17-b3} becomes {@code 2.4.17}, and
+   * {@code spanos3/r202633/04} becomes {@code 3.202633.4}. Each part is read as a number, so
+   * leading zeros are dropped - {@code 04} becomes {@code 4}. A null string, or one with no
+   * digits in it at all, falls back to {@code 1.0.0}.
    */
   public static String firmware(String raw) {
     if (raw == null) {
