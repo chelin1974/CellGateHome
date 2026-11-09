@@ -182,8 +182,10 @@ A `Dockerfile` builds the bridge, `compose.yaml` runs it under plain Docker, and
 `ghcr.io/chelin1974/cellgate-home` by `.github/workflows/image.yml` for amd64 and arm64.
 
 ```bash
-cp cellgate.config.k8s.example.json cellgate.config.json   # then fill it in
-mkdir -p data                               # where the pairing state lives
+mkdir -p data
+# -n never overwrites an existing config. The config lives in ./data alongside everything the
+# bridge writes, which is the one directory compose mounts.
+cp -n cellgate.config.k8s.example.json data/cellgate.config.json
 docker compose up -d
 kubectl apply -k deploy/k8s                 # then create the Secret - see deploy/k8s/README.md
 ```
