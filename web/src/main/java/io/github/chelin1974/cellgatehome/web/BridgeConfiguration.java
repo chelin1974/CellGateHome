@@ -58,8 +58,9 @@ public class BridgeConfiguration {
   @Bean
   CellGateConfig cellGateConfig(CellGateProperties properties) {
     Path file = locate(properties);
-    CellGateConfig config = CellGateConfig.load(file);
+    CellGateConfig config = CellGateConfig.load(file, properties.getDataDirectory());
     log.info("configuration read from {}", file.toAbsolutePath());
+    log.info("writing to {}", config.dataDirectory().toAbsolutePath());
     return config;
   }
 

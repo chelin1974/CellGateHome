@@ -47,6 +47,10 @@ services:
       # The Spring Boot flavour reads the same cellgate.config.json the CLI reads; this points
       # it at the copy on the mounted data directory rather than one beside the jar.
       CELLGATE_CONFIG_FILE: /config/cellgate.config.json
+      # Every file the bridge writes goes here, on the bind mount below. Set explicitly rather
+      # than left to default to the config file's directory, which is the read-only /config
+      # mount - so this is what guarantees the pairing state is on the volume.
+      CELLGATE_DATA_DIRECTORY: /data
 
     volumes:
       # Holds the CellGate password, so it is mounted rather than baked into the image.

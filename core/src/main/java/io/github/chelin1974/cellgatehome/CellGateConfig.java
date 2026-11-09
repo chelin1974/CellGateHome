@@ -70,6 +70,7 @@ public final class CellGateConfig {
   private final int dashboardPort;
   private final String dashboardPasscode;
   private final String bindAddress;
+  private final Path dataDirectory;
   private final Path storagePath;
   private final URI otlpEndpoint;
   private final Duration metricsInterval;
@@ -108,7 +109,17 @@ public final class CellGateConfig {
     // the bridge and differs between a shell, a systemd unit and a container. Losing track of
     // this file un-pairs every controller, so where it lands must not depend on how the
     // bridge was started.
-    this.storagePath = resolveAgainstConfig(directory, raw.storagePath, DEFAULT_STATE_FILE);
+    // Where everything the bridge writes goes: pairing state, accessory IDs, the layout
+    // number. Relative to the configuration file's directory, or absolute; unset it is that
+    // directory, which is what this bridge has always done, so nothing moves for an existing
+    // setup. Naming it lets a deployment put every written file on its mounted volume with one
+    // setting, instead of relying on storagePath's parent being the right place. The SpanHome
+    // and DaikinHome bridges take the same setting.
+    this.dataDirectory =
+        isBlank(raw.dataDirectory)
+            ? directory
+            : resolveAgainstConfig(directory, raw.dataDirectory, "");
+    this.storagePath = resolveAgainstConfig(dataDirectory, raw.storagePath, DEFAULT_STATE_FILE);
 
     if (!isBlank(raw.otlpEndpoint)) {
       this.otlpEndpoint = httpUri("otlpEndpoint", raw.otlpEndpoint.trim());
@@ -173,6 +184,15 @@ public final class CellGateConfig {
     return storagePath;
   }
 
+  /**
+   * The directory every written file lands in.
+   *
+   * <p>{@code dataDirectory} when set, and the configuration file's own directory otherwise.
+   */
+  public Path dataDirectory() {
+    return dataDirectory;
+  }
+
   public URI otlpEndpoint() {
     return otlpEndpoint;
   }
@@ -204,6 +224,18 @@ public final class CellGateConfig {
   }
 
   public static CellGateConfig load(Path file) {
+    return load(file, null);
+  }
+
+  /**
+   * The configuration, with {@code dataDirectory} forced to {@code dataDirectoryOverride}.
+   *
+   * <p>For a deployment that must put every written file somewhere specific without editing the
+   * user's configuration - a container pointing them at its mounted volume, where the config
+   * itself is on a read-only mount and defaulting to its directory would make every write fail.
+   * A null or blank override changes nothing.
+   */
+  public static CellGateConfig load(Path file, String dataDirectoryOverride) {
     if (!Files.isReadable(file)) {
       throw new ConfigException(
           "cannot read the configuration file " + file.toAbsolutePath()
@@ -214,6 +246,9 @@ public final class CellGateConfig {
       raw = new ObjectMapper().readValue(Files.readString(file), Raw.class);
     } catch (IOException | JacksonException e) {
       throw new ConfigException("could not parse " + file.toAbsolutePath() + ": " + e.getMessage(), e);
+    }
+    if (!isBlank(dataDirectoryOverride)) {
+      raw.dataDirectory = dataDirectoryOverride.strip();
     }
     Path parent = file.toAbsolutePath().getParent();
     return new CellGateConfig(raw, parent == null ? Path.of(".") : parent);
@@ -230,6 +265,7 @@ public final class CellGateConfig {
     public Integer dashboardPort;
     public String dashboardPasscode;
     public String bindAddress;
+    public String dataDirectory;
     public String storagePath;
     public String prometheusUrl;
     public String otlpEndpoint;

@@ -5,6 +5,11 @@ cellgate:
   # at registration, accessory IDs, the layout number - is resolved relative to this file, so
   # keeping it with them means one directory to mount and one directory to back up.
   config-file: ${CELLGATE_CONFIG_FILE:}
+  # Overrides "dataDirectory" in the config file, so a deployment can put every written file -
+  # pairing state, accessory IDs, the layout number - somewhere specific without editing the
+  # user's config. The container must set this: its config is on a read-only mount, so
+  # defaulting to the config's own directory would make every write fail.
+  data-directory: ${CELLGATE_DATA_DIRECTORY:}
 
 server:
   # The same port the gate dashboard has always been on. The bridge's own small HTTP

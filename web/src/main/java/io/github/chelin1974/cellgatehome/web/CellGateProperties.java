@@ -25,6 +25,23 @@ public class CellGateProperties {
    */
   private String configFile;
 
+  /**
+   * Overrides {@code dataDirectory} in the configuration file.
+   *
+   * <p>For a deployment that must put the written files somewhere specific without editing the
+   * user's config. The container needs this: its config is on a read-only mount, so defaulting
+   * the data directory to the config's own directory would make every write fail.
+   */
+  private String dataDirectory;
+
+  public String getDataDirectory() {
+    return dataDirectory;
+  }
+
+  public void setDataDirectory(String dataDirectory) {
+    this.dataDirectory = dataDirectory;
+  }
+
   public String getConfigFile() {
     return configFile;
   }
