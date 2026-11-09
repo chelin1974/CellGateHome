@@ -134,7 +134,7 @@ leaving you to remember:
 Starting from scratch instead:
 
 ```bash
-cp cellgate.config.k8s.example.json cellgate.config.json
+cp -n cellgate.config.k8s.example.json cellgate.config.json   # -n: never overwrite an existing one
 $EDITOR cellgate.config.json      # email, password, dashboardPasscode
 ./deploy/k8s/create-secret.sh
 ```
