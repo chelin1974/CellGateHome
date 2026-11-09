@@ -102,9 +102,13 @@ public final class CellGateConfig {
     this.dashboardPasscode = raw.dashboardPasscode == null ? "" : raw.dashboardPasscode;
     this.bindAddress = isBlank(raw.bindAddress) ? null : raw.bindAddress.trim();
     this.prometheusUrl = isBlank(raw.prometheusUrl) ? null : raw.prometheusUrl.trim();
-    this.storagePath = isBlank(raw.storagePath)
-        ? directory.resolve(DEFAULT_STATE_FILE)
-        : Path.of(raw.storagePath.trim());
+    // One rule, shared with the SpanHome and DaikinHome bridges: an absolute storagePath is
+    // taken as given, and a relative one is resolved against the configuration file's own
+    // directory - never the process working directory, which is whatever happened to launch
+    // the bridge and differs between a shell, a systemd unit and a container. Losing track of
+    // this file un-pairs every controller, so where it lands must not depend on how the
+    // bridge was started.
+    this.storagePath = resolveAgainstConfig(directory, raw.storagePath, DEFAULT_STATE_FILE);
 
     if (!isBlank(raw.otlpEndpoint)) {
       this.otlpEndpoint = httpUri("otlpEndpoint", raw.otlpEndpoint.trim());
@@ -257,6 +261,18 @@ public final class CellGateConfig {
 
   private static boolean isBlank(String value) {
     return value == null || value.isBlank();
+  }
+
+  /**
+   * A configured path, relative to the configuration file's own directory.
+   *
+   * <p>Absolute paths are taken as given. A blank setting falls back to {@code fallback} in
+   * the same directory. The process working directory is deliberately never involved: it is
+   * whatever launched the bridge, and differs between a shell, a systemd unit and a container.
+   */
+  private static Path resolveAgainstConfig(Path directory, String configured, String fallback) {
+    Path path = Path.of(isBlank(configured) ? fallback : configured.trim());
+    return path.isAbsolute() ? path : directory.resolve(path);
   }
 
   @SuppressWarnings("unused")

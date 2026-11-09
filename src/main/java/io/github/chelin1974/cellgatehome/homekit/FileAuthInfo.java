@@ -192,9 +192,6 @@ public final class FileAuthInfo implements HomekitAuthInfo {
    * document: either the previous one or the new one, never a half of either. The temporary
    * file is given owner-only permissions before the move rather than after, so the state is
    * never briefly world-readable, and is cleaned up if anything fails.
-   *
-   * <p>AccessoryIds in this package already wrote its file this way; this brings the state
-   * that actually matters into line with it.
    */
   private void save() {
     Path parent = file.toAbsolutePath().getParent();
