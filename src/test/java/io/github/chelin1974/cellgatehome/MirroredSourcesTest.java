@@ -50,6 +50,7 @@ class MirroredSourcesTest {
     Map<String, String> files = new LinkedHashMap<>();
     files.put("AccessoryIds", "src/main/java/io/github/chelin1974/cellgatehome/homekit/AccessoryIds.java");
     files.put("FileAuthInfo", "src/main/java/io/github/chelin1974/cellgatehome/homekit/FileAuthInfo.java");
+    files.put("HomeKitNames", "src/main/java/io/github/chelin1974/cellgatehome/homekit/HomeKitNames.java");
     files.put("LayoutVersion", "src/main/java/io/github/chelin1974/cellgatehome/homekit/LayoutVersion.java");
     files.put("MdnsWatchdog", "src/main/java/io/github/chelin1974/cellgatehome/homekit/MdnsWatchdog.java");
     files.put("NetworkAddresses", "src/main/java/io/github/chelin1974/cellgatehome/homekit/NetworkAddresses.java");
