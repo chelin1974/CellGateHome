@@ -1,12 +1,18 @@
-target/
+# Every module's, not just the root's - a bare "target/" matches only at the context root,
+# so core/target, cli/target and web/target were being sent to the daemon on every build.
+**/target/
 
 .git/
 .gitignore
 .github/
 
-# Never bake credentials or pairing state into an image.
-cellgate.config.json
-*.state.json
+# Never bake credentials or pairing state into an image. These patterns have to be "**/"
+# rather than bare names: a bare name matches only at the context root, and both files now
+# live in ./data, which the next rule keeps out wholesale. Both are here on purpose, so
+# moving the data directory cannot quietly re-open the hole.
+data/
+**/cellgate.config.json
+**/*.state.json
 
 deploy/
 docs/
