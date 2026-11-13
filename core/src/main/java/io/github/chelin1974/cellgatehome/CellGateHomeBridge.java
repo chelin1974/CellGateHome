@@ -148,7 +148,8 @@ public final class CellGateHomeBridge implements AutoCloseable {
           entry.unit().serial(),
           entry.unit().hardwareModel(),
           () -> client.triggerGate(entry.unit(), entry.gate()),
-          scheduler);
+          scheduler,
+          config.assumeOpen());
       accessories.add(accessory);
       gateHandles.add(new GateHandle(accessory, entry.unit().id(), entry.gate().id(),
           entry.statusPortId()));

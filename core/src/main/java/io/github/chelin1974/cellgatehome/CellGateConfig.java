@@ -39,6 +39,9 @@ public final class CellGateConfig {
   /** How often the bridge re-reads the gate state from CellGate. */
   public static final Duration MIN_POLL_INTERVAL = Duration.ofSeconds(20);
   public static final Duration DEFAULT_METRICS_INTERVAL = Duration.ofSeconds(60);
+
+  /** Default for {@code assumeOpenSeconds}; see where it is applied for the reasoning. */
+  public static final Duration DEFAULT_ASSUME_OPEN = Duration.ofSeconds(60);
   public static final Duration MIN_METRICS_INTERVAL = Duration.ofSeconds(10);
   public static final String PROMETHEUS_OTLP_PATH = "/api/v1/otlp/v1/metrics";
 
@@ -76,6 +79,7 @@ public final class CellGateConfig {
   private final Duration metricsInterval;
   private final String prometheusUrl;
   private final boolean doorbell;
+  private final Duration assumeOpen;
   private final List<String> doorbellRingEvents;
 
   private CellGateConfig(Raw raw, Path directory) {
@@ -131,6 +135,15 @@ public final class CellGateConfig {
     this.metricsInterval = raw.metricsIntervalSeconds == null
         ? DEFAULT_METRICS_INTERVAL
         : Duration.ofSeconds(Math.max(MIN_METRICS_INTERVAL.toSeconds(), raw.metricsIntervalSeconds));
+
+    // How long to go on reporting the gate open after triggering it, for hardware that
+    // reports no position. Unset, a minute: long enough to cover a gate swinging open and
+    // standing there, short enough that a stale "open" does not linger all day. 0 turns it
+    // off, which is right for a unit whose status sensor does report - there the measured
+    // reading wins anyway, so this only ever fills a gap.
+    this.assumeOpen = Duration.ofSeconds(
+        raw.assumeOpenSeconds == null ? DEFAULT_ASSUME_OPEN.toSeconds()
+            : Math.max(0, raw.assumeOpenSeconds));
 
     this.doorbell = raw.doorbell == null || raw.doorbell;
     List<String> ring = new ArrayList<>();
@@ -199,6 +212,14 @@ public final class CellGateConfig {
 
   public Duration metricsInterval() {
     return metricsInterval;
+  }
+
+  /**
+   * How long a gate keeps reporting open after it is triggered, when nothing measures its
+   * position. Zero turns the assumption off and such a gate reads Unknown instead.
+   */
+  public Duration assumeOpen() {
+    return assumeOpen;
   }
 
   /** Whether to publish a HomeKit doorbell that rings on gate activity. */
@@ -272,6 +293,7 @@ public final class CellGateConfig {
     public Integer metricsIntervalSeconds;
     public Boolean doorbell;
     public List<String> doorbellRingEvents;
+    public Integer assumeOpenSeconds;
   }
 
   private static Duration atLeast(Integer seconds, int fallback, Duration floor) {

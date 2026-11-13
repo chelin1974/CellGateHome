@@ -366,6 +366,7 @@ changing it.
 | `port` | `51829` | HomeKit port. Different from SpanHome's and DaikinHome's, so all three can run on one machine. |
 | `dashboardPort` | `8090` | Gate Board port. `0` turns it off. |
 | `dashboardPasscode` | none | Household passcode for opening the gate and taking pictures from the dashboard. |
+| `assumeOpenSeconds` | `60` | How long a gate keeps reporting open after you trigger it, when nothing measures its position. `0` turns it off. A measured state always wins. |
 | `doorbell` | `true` | Publish a HomeKit doorbell that rings on gate activity. See [The doorbell](#the-doorbell). |
 | `doorbellRingEvents` | `["Response Picture"]` | Case-insensitive substrings of a log entry's description that ring the doorbell. |
 | `prometheusUrl` | none | Prometheus 3 base URL. Turns on metrics export. |
@@ -411,8 +412,17 @@ your own account's devices, with your own credentials.
   because CellGate exposes no real call-button event. If your gate does log one, name it in
   `doorbellRingEvents`.
 - **Open only.** The gate's own timer or the keypad/app closes it.
-- **State needs a gate-status sensor.** With one wired (this unit has it), Home shows the real
-  Open/Closed state; without one, the tile shows Closed and only reacts to your own opens.
+- **A real Open/Closed state needs a contact wired to the gate-status input.** CellGate
+  provisions that input on every Watchman whether or not anything is connected to it, so it
+  appears in `--list` with a name and sensible labels but reports no state - the portal sends
+  no `LastStateTypeID` for it. Nothing else on the unit substitutes: the gate port is an
+  *output* driven by a momentary relay pulse, so its "Gate Closed" text is the relay's state
+  and not the gate's, and the activity log records commands rather than positions.
+
+  Without a contact, the bridge reports what it does know - that it just opened the gate -
+  for `assumeOpenSeconds` after each trigger, then goes back to Unknown. The dashboard labels
+  that **Assumed open** rather than Open, so an assumption is never shown as a measurement.
+  Apple Home has no "unknown", so its tile reads Closed once the window lapses.
 - **Checked against the Watchman EVO.** Other CellGate hardware may use different endpoints.
 
 ## Development
