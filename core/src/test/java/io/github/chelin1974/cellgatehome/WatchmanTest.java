@@ -107,43 +107,43 @@ class WatchmanTest {
   }
 
   /**
-   * The bug this guards: reading only the sensor gave no state at all, which showed up as a
-   * dashboard stuck on "Unknown" and - because a gate with no reading is skipped when
-   * collecting metrics - an empty Grafana panel with nothing logged to explain it.
+   * The gate port is an output driven by a momentary relay pulse, so its text is the relay's
+   * state and reads "Gate Closed" except during the pulse. Using it as a position would make
+   * this gate report a constant "closed" even while standing open - a false all-clear, which
+   * for a gate is worse than admitting the position is unknown. So it stays unknown.
    */
   @Test
-  @DisplayName("the gate port's own text is used when the status sensor reports none")
-  void fallsBackToTheGatePort() throws Exception {
+  @DisplayName("a silent sensor leaves the gate unknown rather than trusting the output port")
+  void silentSensorIsUnknownNotClosed() throws Exception {
     Watchman u = Watchman.parse(new ObjectMapper().readTree(SILENT_SENSOR_JSON)).get(0);
-    assertEquals(Boolean.FALSE, CellGateHomeBridge.openStateFor(u, 78848L, 78847L));
+    assertEquals("Gate Closed", u.port(78847L).orElseThrow().statusText());
+    assertEquals(null, CellGateHomeBridge.openStateFor(u, 78848L));
   }
 
   @Test
-  @DisplayName("a status sensor that does report a state still wins")
-  void prefersTheStatusSensor() throws Exception {
-    // The sensor says "Open" (high) while the gate port says "Gate Closed" (low), so a result
-    // of true proves the sensor was read rather than the fallback.
+  @DisplayName("a status sensor that reports a state is used")
+  void usesTheStatusSensor() throws Exception {
+    // The sensor says "Open" (high) while the gate port says "Gate Closed" (low).
     String json = JSON.replace(
         "\"PortType\":{\"Code\":\"I\"},\"LastStateTypeID\":1",
         "\"PortType\":{\"Code\":\"I\"},\"LastStateTypeID\":2");
     Watchman u = Watchman.parse(new ObjectMapper().readTree(json)).get(0);
     assertEquals("Open", u.port(78848L).orElseThrow().statusText());
-    assertEquals("Gate Closed", u.port(78847L).orElseThrow().statusText());
-    assertEquals(Boolean.TRUE, CellGateHomeBridge.openStateFor(u, 78848L, 78847L));
+    assertEquals(Boolean.TRUE, CellGateHomeBridge.openStateFor(u, 78848L));
   }
 
   @Test
-  @DisplayName("neither port reporting anything is still unknown")
-  void stillUnknownWhenNothingReports() throws Exception {
-    String json = SILENT_SENSOR_JSON.replace("\"LastStateTypeID\":1,", "");
-    Watchman u = Watchman.parse(new ObjectMapper().readTree(json)).get(0);
-    assertEquals(null, CellGateHomeBridge.openStateFor(u, 78848L, 78847L));
+  @DisplayName("the sensor reporting closed is used as-is")
+  void sensorClosed() throws Exception {
+    Watchman u = Watchman.parse(new ObjectMapper().readTree(JSON)).get(0);
+    assertEquals("Closed", u.port(78848L).orElseThrow().statusText());
+    assertEquals(Boolean.FALSE, CellGateHomeBridge.openStateFor(u, 78848L));
   }
 
   @Test
-  @DisplayName("a gate with no status sensor at all falls back to its own text")
+  @DisplayName("a gate with no status sensor at all is unknown")
   void noSensorAtAll() throws Exception {
     Watchman u = Watchman.parse(new ObjectMapper().readTree(SILENT_SENSOR_JSON)).get(0);
-    assertEquals(Boolean.FALSE, CellGateHomeBridge.openStateFor(u, null, 78847L));
+    assertEquals(null, CellGateHomeBridge.openStateFor(u, null));
   }
 }
