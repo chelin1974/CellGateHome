@@ -259,48 +259,49 @@ public final class CellGateHomeBridge implements AutoCloseable {
   }
 
   /**
-   * The gate's open state: from its status sensor where that reports one, and otherwise from
-   * the gate port itself.
+   * The gate's open state, read from its status sensor only.
    *
-   * <p>The fallback is not a nicety. On a Watchman EVO the status sensor is discovered
-   * correctly, but the portal reports no state for it - {@code lastState} is null, so
-   * {@code statusText()} is null - while the gate port carries the text the portal shows:
+   * <h2>Why the gate port is not a fallback</h2>
+   *
+   * It is tempting, because on a Watchman EVO the status sensor reports nothing while the
+   * gate port carries text that reads like a position:
    *
    * <pre>
    *   port 01  Gate Status     status sensor
    *   port 01  Watchman Gate   GATE (openable) - Gate Closed
    * </pre>
    *
-   * <p>Reading only the sensor left such a gate with no reading at all, which surfaced twice
-   * over: the dashboard said "Unknown" forever, and {@link
-   * io.github.chelin1974.cellgatehome.metrics.CellGateMetrics} skips a gate with no reading,
-   * so nothing reached Prometheus and the Grafana panel stayed empty - with nothing logged
-   * to say why, because the exporter sends no request at all when it has no points.
+   * That text is not a position. The gate port is an <em>output</em> ({@code portTypeCode}
+   * "O", against "I" for the sensor), and opening it is a momentary relay pulse -
+   * {@code EVOWTMMomentaryActuationRequest}. Its state is the relay's, not the gate's, so it
+   * reads {@code RelayLowStatus} - "Gate Closed" - except during the pulse itself.
    *
-   * @return true open, false closed, or null when neither port reports anything usable
+   * <p>Falling back to it was tried and reverted: it made every gate report a constant
+   * "closed", including while the gate stood open. For a gate that is the worst of the three
+   * possible answers. An unknown state is visibly unknown - the dashboard says so and no
+   * metric is exported, leaving an empty panel rather than a flat line at zero - whereas a
+   * confident "closed" is a false all-clear that looks like real data.
+   *
+   * <p>So a gate whose sensor reports nothing stays unknown, which is the honest answer:
+   * nothing the portal exposes says where that gate is.
+   *
+   * @return true open, false closed, or null when the sensor reports nothing usable
    */
   private Boolean openStateFor(GateHandle h) {
     for (Watchman unit : units) {
       if (unit.id() == h.unitId()) {
-        return openStateFor(unit, h.statusPortId(), h.gatePortId());
+        return openStateFor(unit, h.statusPortId());
       }
     }
     return null;
   }
 
   /** The decision on its own, so it can be tested against a unit without running a bridge. */
-  static Boolean openStateFor(Watchman unit, Long statusPortId, long gatePortId) {
-    if (statusPortId != null) {
-      Boolean fromSensor = readOpenState(unit, statusPortId);
-      if (fromSensor != null) {
-        return fromSensor;
-      }
+  static Boolean openStateFor(Watchman unit, Long statusPortId) {
+    if (statusPortId == null) {
+      return null;
     }
-    return readOpenState(unit, gatePortId);
-  }
-
-  private static Boolean readOpenState(Watchman unit, long portId) {
-    return unit.port(portId)
+    return unit.port(statusPortId)
         .map(Watchman.Port::statusText)
         .map(CellGateHomeBridge::looksOpen)
         .orElse(null);
