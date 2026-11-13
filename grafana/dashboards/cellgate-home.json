@@ -29,7 +29,7 @@
       "id": 1,
       "type": "stat",
       "title": "Gate now",
-      "description": "Open or closed, as last reported. 'No data' means the bridge has not managed a reading yet.",
+      "description": "Open or closed, as last reported. \"Unknown\" means nothing currently says where the gate is: either the bridge has not managed a reading yet, or the unit has no position sensor and no opening is in progress.",
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "gridPos": { "h": 5, "w": 8, "x": 0, "y": 0 },
       "targets": [
@@ -49,6 +49,7 @@
       },
       "fieldConfig": {
         "defaults": {
+          "noValue": "Unknown",
           "mappings": [
             {
               "type": "value",
@@ -88,6 +89,7 @@
       },
       "fieldConfig": {
         "defaults": {
+          "noValue": "Unknown",
           "mappings": [
             {
               "type": "value",
@@ -105,7 +107,7 @@
       "id": 3,
       "type": "timeseries",
       "title": "Openings per hour",
-      "description": "Counted from closed-to-open transitions, so a gate held open does not inflate it.",
+      "description": "Counted from closed-to-open transitions, so a gate held open does not inflate it. Only meaningful for a gate with a position sensor wired to its status input: without one the series exists only while an opening is assumed, so this figure measures the sampling, not the gate. See the README.",
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 5 },
       "targets": [
@@ -133,7 +135,7 @@
       "id": 4,
       "type": "timeseries",
       "title": "Share of time open",
-      "description": "Average of the open/closed signal over a rolling hour: 0 is always closed, 1 is always open.",
+      "description": "Average of the open/closed signal over a rolling hour: 0 is always closed, 1 is always open. Only meaningful for a gate with a position sensor wired to its status input: without one the series exists only while an opening is assumed, so this figure measures the sampling, not the gate. See the README.",
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "gridPos": { "h": 8, "w": 12, "x": 12, "y": 5 },
       "targets": [
