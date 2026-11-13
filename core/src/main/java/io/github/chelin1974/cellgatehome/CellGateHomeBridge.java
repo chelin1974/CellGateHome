@@ -258,24 +258,62 @@ public final class CellGateHomeBridge implements AutoCloseable {
     }
   }
 
-  /** The gate's open state from its status sensor, or null when the unit reports none. */
+  /**
+   * The gate's open state: from its status sensor where that reports one, and otherwise from
+   * the gate port itself.
+   *
+   * <p>The fallback is not a nicety. On a Watchman EVO the status sensor is discovered
+   * correctly, but the portal reports no state for it - {@code lastState} is null, so
+   * {@code statusText()} is null - while the gate port carries the text the portal shows:
+   *
+   * <pre>
+   *   port 01  Gate Status     status sensor
+   *   port 01  Watchman Gate   GATE (openable) - Gate Closed
+   * </pre>
+   *
+   * <p>Reading only the sensor left such a gate with no reading at all, which surfaced twice
+   * over: the dashboard said "Unknown" forever, and {@link
+   * io.github.chelin1974.cellgatehome.metrics.CellGateMetrics} skips a gate with no reading,
+   * so nothing reached Prometheus and the Grafana panel stayed empty - with nothing logged
+   * to say why, because the exporter sends no request at all when it has no points.
+   *
+   * @return true open, false closed, or null when neither port reports anything usable
+   */
   private Boolean openStateFor(GateHandle h) {
     for (Watchman unit : units) {
-      if (unit.id() != h.unitId()) {
-        continue;
+      if (unit.id() == h.unitId()) {
+        return openStateFor(unit, h.statusPortId(), h.gatePortId());
       }
-      if (h.statusPortId() == null) {
-        return null;
-      }
-      return unit.port(h.statusPortId())
-          .map(Watchman.Port::statusText)
-          .map(CellGateHomeBridge::looksOpen)
-          .orElse(null);
     }
     return null;
   }
 
-  /** CellGate's status text is like "Gate Open" / "Gate Closed" / "Open" / "Closed". */
+  /** The decision on its own, so it can be tested against a unit without running a bridge. */
+  static Boolean openStateFor(Watchman unit, Long statusPortId, long gatePortId) {
+    if (statusPortId != null) {
+      Boolean fromSensor = readOpenState(unit, statusPortId);
+      if (fromSensor != null) {
+        return fromSensor;
+      }
+    }
+    return readOpenState(unit, gatePortId);
+  }
+
+  private static Boolean readOpenState(Watchman unit, long portId) {
+    return unit.port(portId)
+        .map(Watchman.Port::statusText)
+        .map(CellGateHomeBridge::looksOpen)
+        .orElse(null);
+  }
+
+  /**
+   * CellGate's status text is like "Gate Open" / "Gate Closed" / "Open" / "Closed".
+   *
+   * <p>"open" is tested first, which decides any text containing both words. That is the
+   * safer way round for a gate: reporting open when it is shut is a nuisance, reporting shut
+   * when it is standing open is a false all-clear, and HomeKit already reads an unknown
+   * state as closed.
+   */
   static Boolean looksOpen(String statusText) {
     if (statusText == null) {
       return null;
