@@ -73,7 +73,9 @@ public final class CellGateHomeBridge implements AutoCloseable {
   private MdnsWatchdog mdnsWatchdog;
   private JmDNS jmdns;
   private volatile Consumer<String> advertisementFailureListener = reason -> {};
-  private OtlpExporter exporter;
+  // volatile: pushMetricsSoon() reads this from a HomeKit or dashboard thread, while start()
+  // assigns it on another.
+  private volatile OtlpExporter exporter;
   private DoorbellWatcher doorbellWatcher;
   private volatile boolean running;
 
@@ -147,7 +149,10 @@ public final class CellGateHomeBridge implements AutoCloseable {
           display,
           entry.unit().serial(),
           entry.unit().hardwareModel(),
-          () -> client.triggerGate(entry.unit(), entry.gate()),
+          () -> {
+            client.triggerGate(entry.unit(), entry.gate());
+            pushMetricsSoon();
+          },
           scheduler,
           config.assumeOpen());
       accessories.add(accessory);
@@ -242,6 +247,31 @@ public final class CellGateHomeBridge implements AutoCloseable {
       h.accessory().updateOpen(openStateFor(h));
     }
     ringDoorbells();
+  }
+
+  /**
+   * Pushes metrics shortly after a gate is triggered, so the opening cannot fall between two
+   * scheduled pushes and vanish.
+   *
+   * <p>Needed because the two intervals are unrelated: metrics go out every {@code
+   * metricsIntervalSeconds} on a fixed cadence, while an assumed-open window lasts {@code
+   * assumeOpenSeconds} from whenever you pressed the button. At the defaults - 60 seconds each
+   * - an opening lands one sample or none at all, depending where in the cycle it happened to
+   * fall. A gate that was opened and recorded nowhere is the whole fault this is meant to fix.
+   *
+   * <p>Delayed rather than immediate: the caller is {@code GateAccessory}'s trigger, which
+   * runs <em>before</em> the accessory marks itself open, so an inline push would collect the
+   * state from before the opening. The second push keeps the series from being a single
+   * isolated point, which most panels cannot draw.
+   */
+  private void pushMetricsSoon() {
+    OtlpExporter active = exporter;
+    if (active == null) {
+      return;
+    }
+    for (int seconds : new int[] {2, 15}) {
+      scheduler.schedule(active::push, seconds, TimeUnit.SECONDS);
+    }
   }
 
   /** Reads recent activity and rings a doorbell for each new "someone's at the gate" entry. */
