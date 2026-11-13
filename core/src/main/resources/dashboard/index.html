@@ -114,7 +114,11 @@ function render() {
   else { s.className = "status live"; s.textContent = switching ? "Live" : "View only"; }
   if (!state) return;
   $("gates").innerHTML = state.gates.map(g => {
-    const st = g.state === "open" ? '<span class="pill open">Open</span>'
+    // "Assumed open" when the state is the one we commanded rather than one the gate
+    // reported. A unit with no position sensor can only be assumed, and calling that plain
+    // "Open" would claim a measurement nobody took.
+    const st = g.state === "open"
+        ? `<span class="pill open">${g.assumed ? "Assumed open" : "Open"}</span>`
       : g.state === "closed" ? '<span class="pill closed">Closed</span>' : '<span class="pill">Unknown</span>';
     return `<div class="gate"><div><h2>${esc(g.name)}</h2>${g.location ? `<div class="where">${esc(g.location)}</div>` : ""}</div>
       <div style="display:flex;gap:12px;align-items:center">${st}<button type="button" data-open="${esc(g.id)}">Open</button></div></div>`;

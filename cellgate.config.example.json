@@ -8,6 +8,9 @@
   "port": 51829,
 
   "dashboardPort": 8090,
+
+  "_assumeOpenSeconds": "How long the gate keeps reporting open after you trigger it, for a unit with no position sensor wired to its status input. 0 turns it off and such a gate reads Unknown. Ignored where the sensor does report - a measured state always wins.",
+  "assumeOpenSeconds": 60,
   "dashboardPasscode": "",
 
   "prometheusUrl": "",

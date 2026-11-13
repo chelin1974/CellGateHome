@@ -50,6 +50,9 @@ public final class DashboardModel {
       m.put("location", g.location());
       Boolean open = g.accessory().isOpen();
       m.put("state", !g.accessory().hasReading() ? "unknown" : open ? "open" : "closed");
+      // Whether that came from the gate's sensor or from the trigger we sent, so the page can
+      // say which instead of presenting an assumption as a reading.
+      m.put("assumed", g.accessory().isAssumed());
       list.add(m);
     }
     Map<String, Object> state = new LinkedHashMap<>();

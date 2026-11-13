@@ -137,4 +137,33 @@ class ConfigAndMetricsTest {
   private static GateAccessory gate(String name, ScheduledExecutorService scheduler) {
     return new GateAccessory(2, name, "serial", "WTM-EVO", () -> {}, scheduler);
   }
+
+  /**
+   * The reason the assumption exists at all. A gate with no position sensor used to export
+   * nothing ever - CellGateMetrics skips a gate with no reading - so the Grafana panel stayed
+   * empty however often the gate was opened, with no log line to say why.
+   */
+  @Test
+  @DisplayName("opening a gate with no sensor exports a point, so the opening reaches Prometheus")
+  void assumedOpenIsExported() {
+    ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
+    try {
+      GateAccessory sensorless = new GateAccessory(
+          2, "Front", "serial", "WTM-EVO", () -> {}, scheduler, java.time.Duration.ofMinutes(1));
+
+      DashboardModel model =
+          new DashboardModel(List.of(new Gate("g1", "Front", "Home", sensorless)), List.of(), null);
+
+      assertEquals(0, CellGateMetrics.collect(model).size(), "nothing known yet, nothing sent");
+
+      sensorless.open();
+
+      List<Point> points = CellGateMetrics.collect(model);
+      assertEquals(1, points.size(), "the opening is exported");
+      assertEquals(1.0, points.get(0).value());
+      assertEquals("Front", points.get(0).attributes().get("gate"));
+    } finally {
+      scheduler.shutdownNow();
+    }
+  }
 }

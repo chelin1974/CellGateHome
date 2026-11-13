@@ -54,14 +54,29 @@ public final class GateAccessory implements GarageDoorOpenerAccessory {
   private volatile boolean optimisticOpening;
   private volatile Instant optimisticUntil = Instant.EPOCH;
 
+  /**
+   * How long to go on reporting open after a trigger, for a gate with no position sensor.
+   * {@link Duration#ZERO} turns it off.
+   */
+  private final Duration assumeOpenFor;
+
+  private volatile Instant assumedOpenUntil = Instant.EPOCH;
+
   public GateAccessory(int id, String name, String serial, String firmware, Trigger trigger,
       ScheduledExecutorService scheduler) {
+    this(id, name, serial, firmware, trigger, scheduler, Duration.ZERO);
+  }
+
+  public GateAccessory(int id, String name, String serial, String firmware, Trigger trigger,
+      ScheduledExecutorService scheduler, Duration assumeOpenFor) {
     this.id = id;
     this.name = name;
     this.serial = serial;
     this.firmware = firmware == null ? "1.0.0" : firmware;
     this.trigger = trigger;
     this.scheduler = scheduler;
+    this.assumeOpenFor =
+        assumeOpenFor == null || assumeOpenFor.isNegative() ? Duration.ZERO : assumeOpenFor;
   }
 
   /** Feeds in a freshly polled state. Null means "not reported"; fires HomeKit on a change. */
@@ -77,12 +92,40 @@ public final class GateAccessory implements GarageDoorOpenerAccessory {
     }
   }
 
+  /**
+   * Whether anything is known about this gate's position - measured, or assumed from a
+   * trigger we sent.
+   */
   public boolean hasReading() {
-    return open != null;
+    return open != null || withinAssumedWindow();
   }
 
+  /**
+   * The gate's position: the sensor's reading where there is one, otherwise open while an
+   * assumed window from a trigger is still running, otherwise null for unknown.
+   *
+   * <p>A measured reading always wins. The assumption only fills the gap left by hardware
+   * that reports no position at all, where the alternative is discarding the one thing the
+   * bridge does know - that it just opened the gate - and showing Unknown through the whole
+   * opening.
+   */
   public Boolean isOpen() {
-    return open;
+    if (open != null) {
+      return open;
+    }
+    return withinAssumedWindow() ? Boolean.TRUE : null;
+  }
+
+  /**
+   * True when {@link #isOpen()} is reporting a commanded state rather than a measured one, so
+   * the dashboard can say which it is instead of implying the gate was sensed.
+   */
+  public boolean isAssumed() {
+    return open == null && withinAssumedWindow();
+  }
+
+  private boolean withinAssumedWindow() {
+    return Instant.now().isBefore(assumedOpenUntil);
   }
 
   // ------------------------------------------------------------- door state
@@ -92,7 +135,10 @@ public final class GateAccessory implements GarageDoorOpenerAccessory {
     if (optimisticOpening && Instant.now().isBefore(optimisticUntil)) {
       return CompletableFuture.completedFuture(CurrentDoorStateEnum.OPENING);
     }
-    Boolean o = open;
+    // isOpen(), not the raw field, so an assumed open shows as open here too - otherwise Home
+    // snapped back to closed the moment the "opening" window ended, on a gate that had in
+    // fact just opened.
+    Boolean o = isOpen();
     // Unknown state reads as closed: HomeKit has no "unknown", and closed is the safe default.
     return CompletableFuture.completedFuture(
         Boolean.TRUE.equals(o) ? CurrentDoorStateEnum.OPEN : CurrentDoorStateEnum.CLOSED);
@@ -104,7 +150,7 @@ public final class GateAccessory implements GarageDoorOpenerAccessory {
       return CompletableFuture.completedFuture(TargetDoorStateEnum.OPEN);
     }
     return CompletableFuture.completedFuture(
-        Boolean.TRUE.equals(open) ? TargetDoorStateEnum.OPEN : TargetDoorStateEnum.CLOSED);
+        Boolean.TRUE.equals(isOpen()) ? TargetDoorStateEnum.OPEN : TargetDoorStateEnum.CLOSED);
   }
 
   @Override
@@ -131,8 +177,20 @@ public final class GateAccessory implements GarageDoorOpenerAccessory {
     } catch (Exception e) {
       log.warn("could not open \"{}\": {}", name, e.getMessage());
       optimisticOpening = false;
+      assumedOpenUntil = Instant.EPOCH; // nothing was opened, so assume nothing
       snapBack();
       return;
+    }
+    // The gate is open now. On hardware that reports a position the next poll says so and
+    // that wins; on hardware that never does, this is the only thing that will.
+    if (!assumeOpenFor.isZero()) {
+      assumedOpenUntil = Instant.now().plus(assumeOpenFor);
+      // Fire again when the assumption lapses, or Home would sit on a stale "open" until
+      // something else happened to prod it.
+      scheduler.schedule(() -> {
+        fire(onCurrent);
+        fire(onTarget);
+      }, assumeOpenFor.toMillis() + 500, TimeUnit.MILLISECONDS);
     }
     // When the window ends, fall back to the real polled state.
     scheduler.schedule(() -> {
