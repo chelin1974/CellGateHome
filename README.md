@@ -367,6 +367,7 @@ changing it.
 | `dashboardPort` | `8090` | Gate Board port. `0` turns it off. |
 | `dashboardPasscode` | none | Household passcode for opening the gate and taking pictures from the dashboard. |
 | `assumeOpenSeconds` | `60` | How long a gate keeps reporting open after you trigger it, when nothing measures its position. `0` turns it off. A measured state always wins. |
+| `watchAfterOpenSeconds` | `120` | After an open, read the portal every 5s for this long rather than waiting for the next poll. `0` turns it off; capped at 600. |
 | `doorbell` | `true` | Publish a HomeKit doorbell that rings on gate activity. See [The doorbell](#the-doorbell). |
 | `doorbellRingEvents` | `["Response Picture"]` | Case-insensitive substrings of a log entry's description that ring the doorbell. |
 | `prometheusUrl` | none | Prometheus 3 base URL. Turns on metrics export. |
@@ -418,6 +419,12 @@ your own account's devices, with your own credentials.
   no `LastStateTypeID` for it. Nothing else on the unit substitutes: the gate port is an
   *output* driven by a momentary relay pulse, so its "Gate Closed" text is the relay's state
   and not the gate's, and the activity log records commands rather than positions.
+
+  Opening a gate also starts a short burst of polling - every 5s for `watchAfterOpenSeconds`
+  - because the moments around an opening are the only time a working sensor would have
+  anything to report, and an ordinary poll of 20s or more is likely to miss it. If a reading
+  ever does arrive, the log says so once, by name, and that gate's state is measured from
+  then on.
 
   Without a contact, the bridge reports what it does know - that it just opened the gate -
   for `assumeOpenSeconds` after each trigger, then goes back to Unknown. The dashboard labels
