@@ -42,6 +42,12 @@ public final class CellGateConfig {
 
   /** Default for {@code assumeOpenSeconds}; see where it is applied for the reasoning. */
   public static final Duration DEFAULT_ASSUME_OPEN = Duration.ofSeconds(60);
+
+  /** Default for {@code watchAfterOpenSeconds}; see where it is applied for the reasoning. */
+  public static final Duration DEFAULT_WATCH_AFTER_OPEN = Duration.ofSeconds(120);
+
+  /** Longest {@code watchAfterOpenSeconds} accepted, so a typo cannot hammer CellGate all day. */
+  public static final Duration MAX_WATCH_AFTER_OPEN = Duration.ofMinutes(10);
   public static final Duration MIN_METRICS_INTERVAL = Duration.ofSeconds(10);
   public static final String PROMETHEUS_OTLP_PATH = "/api/v1/otlp/v1/metrics";
 
@@ -80,6 +86,7 @@ public final class CellGateConfig {
   private final String prometheusUrl;
   private final boolean doorbell;
   private final Duration assumeOpen;
+  private final Duration watchAfterOpen;
   private final List<String> doorbellRingEvents;
 
   private CellGateConfig(Raw raw, Path directory) {
@@ -144,6 +151,16 @@ public final class CellGateConfig {
     this.assumeOpen = Duration.ofSeconds(
         raw.assumeOpenSeconds == null ? DEFAULT_ASSUME_OPEN.toSeconds()
             : Math.max(0, raw.assumeOpenSeconds));
+
+    // After opening a gate, read the portal every few seconds for this long instead of
+    // waiting out pollIntervalSeconds. Two reasons: a unit whose status sensor does work
+    // reports the opening within seconds rather than up to a poll late, and on a unit whose
+    // sensor has never reported, this is what would catch it if it ever did - the moments
+    // around an opening are the only time there is anything to see. 0 turns it off.
+    long watch = raw.watchAfterOpenSeconds == null
+        ? DEFAULT_WATCH_AFTER_OPEN.toSeconds()
+        : Math.max(0, raw.watchAfterOpenSeconds);
+    this.watchAfterOpen = Duration.ofSeconds(Math.min(watch, MAX_WATCH_AFTER_OPEN.toSeconds()));
 
     this.doorbell = raw.doorbell == null || raw.doorbell;
     List<String> ring = new ArrayList<>();
@@ -222,6 +239,14 @@ public final class CellGateConfig {
     return assumeOpen;
   }
 
+  /**
+   * How long to keep reading the portal every few seconds after a gate is opened, rather than
+   * waiting for the next ordinary poll. Zero turns it off.
+   */
+  public Duration watchAfterOpen() {
+    return watchAfterOpen;
+  }
+
   /** Whether to publish a HomeKit doorbell that rings on gate activity. */
   public boolean doorbell() {
     return doorbell;
@@ -294,6 +319,7 @@ public final class CellGateConfig {
     public Boolean doorbell;
     public List<String> doorbellRingEvents;
     public Integer assumeOpenSeconds;
+    public Integer watchAfterOpenSeconds;
   }
 
   private static Duration atLeast(Integer seconds, int fallback, Duration floor) {
