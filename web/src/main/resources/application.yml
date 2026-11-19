@@ -47,3 +47,10 @@ logging:
     io.github.chelin1974.cellgatehome: INFO
     # HAP-Java logs every HomeKit frame at INFO, which buries everything else.
     io.github.hapjava: WARN
+    # JmDNS 3.5.6 predates HTTPS/SVCB records (DNS type 65, RFC 9460), which printers and
+    # Apple devices now put in ordinary mDNS queries. It maps 65 to TYPE_IGNORE and warns
+    # "Could not find record type" with a hex dump, for every such packet from any device on
+    # the network - nothing to do with this bridge's own advertisement, and nothing anyone
+    # can act on. Only inbound parsing is quieted; MdnsWatchdog still reports our own
+    # advertisement dying, and it is our code, not this logger.
+    javax.jmdns.impl.DNSIncoming: ERROR
