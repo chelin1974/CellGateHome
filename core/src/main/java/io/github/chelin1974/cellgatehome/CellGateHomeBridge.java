@@ -27,6 +27,7 @@ import java.io.IOException;
 import java.net.InetAddress;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -83,8 +84,18 @@ public final class CellGateHomeBridge implements AutoCloseable {
   private GateActivityWatcher gateActivityWatcher;
   private volatile boolean running;
 
+  /** How often the post-open watch reads the portal; see {@link #watchAfterOpen()}. */
+  private static final Duration WATCH_POLL_INTERVAL = Duration.ofSeconds(5);
+
+  private volatile Instant watchUntil = Instant.EPOCH;
+  private final java.util.concurrent.atomic.AtomicBoolean watching =
+      new java.util.concurrent.atomic.AtomicBoolean();
+  private final java.util.Set<Long> sensorsThatHaveReported =
+      java.util.concurrent.ConcurrentHashMap.newKeySet();
+
   /** A gate accessory tied back to the unit and port it drives, so polling can update it. */
-  private record GateHandle(GateAccessory accessory, long unitId, long gatePortId, Long statusPortId) {}
+  private record GateHandle(
+      GateAccessory accessory, String name, long unitId, long gatePortId, Long statusPortId) {}
 
   public CellGateHomeBridge(CellGateConfig config) {
     this(config, new CellGateClient(config.email(), config.password(), config.requestTimeout()));
@@ -156,11 +167,12 @@ public final class CellGateHomeBridge implements AutoCloseable {
           () -> {
             client.triggerGate(entry.unit(), entry.gate());
             pushMetricsSoon();
+            watchAfterOpen();
           },
           scheduler,
           config.assumeOpen());
       accessories.add(accessory);
-      gateHandles.add(new GateHandle(accessory, entry.unit().id(), entry.gate().id(),
+      gateHandles.add(new GateHandle(accessory, display, entry.unit().id(), entry.gate().id(),
           entry.statusPortId()));
       dashboardGates.add(new Gate("gate-" + entry.gate().id(), display, entry.unit().location(), accessory));
 
@@ -257,9 +269,77 @@ public final class CellGateHomeBridge implements AutoCloseable {
       return;
     }
     for (GateHandle h : gateHandles) {
-      h.accessory().updateOpen(openStateFor(h));
+      Boolean measured = openStateFor(h);
+      noteFirstMeasuredReading(h, measured);
+      h.accessory().updateOpen(measured);
     }
     readActivity();
+  }
+
+  /**
+   * Reads the portal every few seconds for a while after a gate is opened.
+   *
+   * <p>An ordinary poll runs every {@code pollIntervalSeconds}, at least 20, which is fine for
+   * a gate sitting still and useless across an opening: the gate can swing open and shut again
+   * between two reads. This closes that gap where it matters, for {@code
+   * watchAfterOpenSeconds} from the trigger.
+   *
+   * <p>It also decides a question this bridge cannot otherwise answer. A Watchman whose status
+   * input has nothing wired to it never reports a position, and the only moment it would, if
+   * it ever did, is around an opening - which an ordinary poll is likely to miss entirely. If
+   * a reading appears during the watch, {@link #noteFirstMeasuredReading} says so once, and
+   * the measured value takes over from the assumed one everywhere from that point.
+   *
+   * <p>Re-triggering extends the window rather than starting a second watcher, so holding the
+   * button does not multiply the requests to CellGate.
+   */
+  private void watchAfterOpen() {
+    Duration window = config.watchAfterOpen();
+    if (window.isZero()) {
+      return;
+    }
+    watchUntil = Instant.now().plus(window);
+    if (watching.compareAndSet(false, true)) {
+      scheduleWatchPoll();
+    }
+  }
+
+  private void scheduleWatchPoll() {
+    scheduler.schedule(
+        () -> {
+          try {
+            poll();
+          } catch (RuntimeException e) {
+            log.debug("watch poll failed: {}", Failures.describe(e));
+          } finally {
+            if (running && Instant.now().isBefore(watchUntil)) {
+              scheduleWatchPoll();
+            } else {
+              watching.set(false);
+            }
+          }
+        },
+        WATCH_POLL_INTERVAL.toSeconds(),
+        TimeUnit.SECONDS);
+  }
+
+  /**
+   * Says once, per gate, that its status sensor has reported a position.
+   *
+   * <p>Worth a line of its own: until it happens there is no way to tell a unit with nothing
+   * wired to its status input from one whose sensor simply has not been caught reporting yet,
+   * and the two call for completely different fixes - a contact on the input, or nothing at
+   * all. After this, the gate's state is measured and the assumed-open window stops mattering
+   * for it.
+   */
+  private void noteFirstMeasuredReading(GateHandle h, Boolean measured) {
+    if (measured == null || !sensorsThatHaveReported.add(h.gatePortId())) {
+      return;
+    }
+    log.info(
+        "gate \"{}\" reported a position from its status sensor ({}); its state is measured"
+            + " from now on rather than assumed from the last open command.",
+        h.name(), measured ? "open" : "closed");
   }
 
   /**

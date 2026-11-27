@@ -11,6 +11,9 @@
 
   "_assumeOpenSeconds": "How long the gate keeps reporting open after you trigger it, for a unit with no position sensor wired to its status input. 0 turns it off and such a gate reads Unknown. Ignored where the sensor does report - a measured state always wins.",
   "assumeOpenSeconds": 60,
+
+  "_watchAfterOpenSeconds": "After opening a gate, read the portal every 5s for this long instead of waiting out pollIntervalSeconds, so an opening is not missed between polls. Also the only thing likely to catch a status sensor that does report - the moments around an opening are when there is something to see. 0 turns it off; capped at 600.",
+  "watchAfterOpenSeconds": 120,
   "dashboardPasscode": "",
 
   "prometheusUrl": "",

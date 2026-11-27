@@ -31,6 +31,44 @@ class ConfigAndMetricsTest {
     return CellGateConfig.load(file);
   }
 
+  // ------------------------------------------------- watching the gate after an open
+
+  @Test
+  @DisplayName("watchAfterOpenSeconds defaults to two minutes")
+  void watchDefaults() throws Exception {
+    assertEquals(
+        java.time.Duration.ofSeconds(120),
+        config("{\"email\":\"a@b.com\",\"password\":\"x\"}").watchAfterOpen());
+  }
+
+  @Test
+  @DisplayName("watchAfterOpenSeconds 0 turns the watch off")
+  void watchOff() throws Exception {
+    assertEquals(
+        java.time.Duration.ZERO,
+        config("{\"email\":\"a@b.com\",\"password\":\"x\",\"watchAfterOpenSeconds\":0}")
+            .watchAfterOpen());
+  }
+
+  /** A typo here means polling a cloud API every five seconds, so it is capped rather than trusted. */
+  @Test
+  @DisplayName("an absurd watchAfterOpenSeconds is capped at ten minutes")
+  void watchCapped() throws Exception {
+    assertEquals(
+        java.time.Duration.ofMinutes(10),
+        config("{\"email\":\"a@b.com\",\"password\":\"x\",\"watchAfterOpenSeconds\":86400}")
+            .watchAfterOpen());
+  }
+
+  @Test
+  @DisplayName("a negative watchAfterOpenSeconds is treated as off, not as a huge window")
+  void watchNegative() throws Exception {
+    assertEquals(
+        java.time.Duration.ZERO,
+        config("{\"email\":\"a@b.com\",\"password\":\"x\",\"watchAfterOpenSeconds\":-5}")
+            .watchAfterOpen());
+  }
+
   @Test
   @DisplayName("an absolute storagePath is taken as given")
   void absoluteStoragePath() throws Exception {
