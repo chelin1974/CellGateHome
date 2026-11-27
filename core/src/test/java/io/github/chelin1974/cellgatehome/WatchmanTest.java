@@ -4,13 +4,21 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import tools.jackson.databind.ObjectMapper;
+import io.github.chelin1974.cellgatehome.cellgate.portal.ApiClient;
+import io.github.chelin1974.cellgatehome.cellgate.portal.model.Module;
+import tools.jackson.core.type.TypeReference;
 import io.github.chelin1974.cellgatehome.cellgate.Watchman;
 import java.util.List;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 class WatchmanTest {
+
+  /** Reads a getModules reply the way the generated client does, then builds the units. */
+  static List<Watchman> parse(String json) {
+    return Watchman.from(new ApiClient().getObjectMapper()
+        .readValue(json, new TypeReference<List<Module>>() {}));
+  }
 
   /** A trimmed-down getModules reply for one Watchman EVO single-family unit. */
   static final String JSON = """
@@ -31,7 +39,7 @@ class WatchmanTest {
   @Test
   @DisplayName("parses the unit, its gate, camera and the status sensor that reports the gate")
   void parse() throws Exception {
-    List<Watchman> units = Watchman.parse(new ObjectMapper().readTree(JSON));
+    List<Watchman> units = parse(JSON);
     assertEquals(1, units.size());
     Watchman u = units.get(0);
     assertEquals("Front gate", u.location());
@@ -65,7 +73,7 @@ class WatchmanTest {
   @Test
   @DisplayName("discoverGates finds the gate and links its status sensor")
   void discover() throws Exception {
-    List<Watchman> units = Watchman.parse(new ObjectMapper().readTree(JSON));
+    List<Watchman> units = parse(JSON);
     var gates = CellGateHomeBridge.discoverGates(units);
     assertEquals(1, gates.size());
     assertEquals("Front gate", gates.get(0).name());
@@ -97,7 +105,7 @@ class WatchmanTest {
   @Test
   @DisplayName("a status sensor that reports no state leaves the gate port as the only reading")
   void silentSensorStillParses() throws Exception {
-    Watchman u = Watchman.parse(new ObjectMapper().readTree(SILENT_SENSOR_JSON)).get(0);
+    Watchman u = parse(SILENT_SENSOR_JSON).get(0);
     Watchman.Port gate = u.gates().get(0);
 
     // Discovered and linked, exactly as before - this was never a discovery failure.
@@ -115,7 +123,7 @@ class WatchmanTest {
   @Test
   @DisplayName("a silent sensor leaves the gate unknown rather than trusting the output port")
   void silentSensorIsUnknownNotClosed() throws Exception {
-    Watchman u = Watchman.parse(new ObjectMapper().readTree(SILENT_SENSOR_JSON)).get(0);
+    Watchman u = parse(SILENT_SENSOR_JSON).get(0);
     assertEquals("Gate Closed", u.port(78847L).orElseThrow().statusText());
     assertEquals(null, CellGateHomeBridge.openStateFor(u, 78848L));
   }
@@ -127,7 +135,7 @@ class WatchmanTest {
     String json = JSON.replace(
         "\"PortType\":{\"Code\":\"I\"},\"LastStateTypeID\":1",
         "\"PortType\":{\"Code\":\"I\"},\"LastStateTypeID\":2");
-    Watchman u = Watchman.parse(new ObjectMapper().readTree(json)).get(0);
+    Watchman u = parse(json).get(0);
     assertEquals("Open", u.port(78848L).orElseThrow().statusText());
     assertEquals(Boolean.TRUE, CellGateHomeBridge.openStateFor(u, 78848L));
   }
@@ -135,7 +143,7 @@ class WatchmanTest {
   @Test
   @DisplayName("the sensor reporting closed is used as-is")
   void sensorClosed() throws Exception {
-    Watchman u = Watchman.parse(new ObjectMapper().readTree(JSON)).get(0);
+    Watchman u = parse(JSON).get(0);
     assertEquals("Closed", u.port(78848L).orElseThrow().statusText());
     assertEquals(Boolean.FALSE, CellGateHomeBridge.openStateFor(u, 78848L));
   }
@@ -143,7 +151,7 @@ class WatchmanTest {
   @Test
   @DisplayName("a gate with no status sensor at all is unknown")
   void noSensorAtAll() throws Exception {
-    Watchman u = Watchman.parse(new ObjectMapper().readTree(SILENT_SENSOR_JSON)).get(0);
+    Watchman u = parse(SILENT_SENSOR_JSON).get(0);
     assertEquals(null, CellGateHomeBridge.openStateFor(u, null));
   }
 }

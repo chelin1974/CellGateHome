@@ -1,13 +1,14 @@
 package io.github.chelin1974.cellgatehome.cellgate;
 
-import tools.jackson.databind.JsonNode;
+import io.github.chelin1974.cellgatehome.cellgate.portal.model.Module;
+import io.github.chelin1974.cellgatehome.cellgate.portal.model.ModulePort;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 
 /**
  * One CellGate unit (a "module") and its ports, as the portal's {@code Dashboard/getModules}
- * returns them. Pure: built from JSON, no network.
+ * returns them. Pure: built from the generated {@code Module} records, no network.
  *
  * <p>A Watchman EVO single-family unit has an output port that opens the gate ("Watchman
  * Gate", entry type Gate), an input port that can report the gate's position ("Gate Status",
@@ -63,38 +64,40 @@ public record Watchman(
     }
   }
 
-  public static List<Watchman> parse(JsonNode modules) {
+  /** Builds the units from {@code getModules}' reply, skipping deleted ports. */
+  public static List<Watchman> from(List<Module> modules) {
     List<Watchman> out = new ArrayList<>();
-    for (JsonNode m : modules) {
+    for (Module m : modules == null ? List.<Module>of() : modules) {
       List<Port> ports = new ArrayList<>();
-      for (JsonNode p : m.path("ModulePorts")) {
-        if (p.path("IsDeleted").asBoolean(false)) {
+      for (ModulePort p : m.modulePorts() == null ? List.<ModulePort>of() : m.modulePorts()) {
+        if (Boolean.TRUE.equals(p.isDeleted())) {
           continue;
         }
         ports.add(new Port(
-            p.path("ID").asLong(),
-            text(p, "Name"),
-            text(p, "PortNumber"),
-            text(p.path("EntryType"), "Name"),
-            text(p.path("PortType"), "Code"),
-            p.hasNonNull("LastStateTypeID") ? p.get("LastStateTypeID").asInt() : null,
-            text(p, "RelayLowStatus"),
-            text(p, "RelayHighStatus"),
-            p.hasNonNull("ParentID") ? p.get("ParentID").asLong() : null,
-            p.path("IsHoldOpenStatus").asBoolean(false) || p.path("IsHolding").asBoolean(false),
-            p.path("IsSupportLiveStream").asBoolean(false)));
+            orZero(p.ID()),
+            trim(p.name()),
+            trim(p.portNumber()),
+            p.entryType() == null ? null : trim(p.entryType().name()),
+            p.portType() == null ? null : trim(p.portType().code()),
+            p.lastStateTypeID(),
+            trim(p.relayLowStatus()),
+            trim(p.relayHighStatus()),
+            p.parentID(),
+            Boolean.TRUE.equals(p.isHoldOpenStatus()) || Boolean.TRUE.equals(p.isHolding()),
+            Boolean.TRUE.equals(p.isSupportLiveStream())));
       }
-      JsonNode location = m.path("PropertyLocation");
+      var location = m.propertyLocation();
       out.add(new Watchman(
-          m.path("ID").asLong(),
-          m.path("ModuleModemID").asLong(),
-          text(m, "DeviceSerialNumber"),
-          text(m.path("KitHardwareType"), "Model"),
-          text(m.path("KitModelType"), "Name"),
-          text(location, "Name"),
-          m.path("PropertyLocationID").asLong(),
-          location.hasNonNull("TimezoneID") ? location.get("TimezoneID").asInt() : null,
-          m.path("IsOnline").asBoolean(true),
+          orZero(m.ID()),
+          orZero(m.moduleModemID()),
+          trim(m.deviceSerialNumber()),
+          m.kitHardwareType() == null ? null : trim(m.kitHardwareType().model()),
+          m.kitModelType() == null ? null : trim(m.kitModelType().name()),
+          location == null ? null : trim(location.name()),
+          orZero(m.propertyLocationID()),
+          location == null ? null : location.timezoneID(),
+          // A missing IsOnline reads as online, as the portal treats it.
+          !Boolean.FALSE.equals(m.isOnline()),
           List.copyOf(ports)));
     }
     return out;
@@ -129,8 +132,11 @@ public record Watchman(
     return "WTM-EVO".equalsIgnoreCase(hardwareModel);
   }
 
-  private static String text(JsonNode node, String field) {
-    JsonNode v = node.path(field);
-    return v.isMissingNode() || v.isNull() ? null : v.asString().trim();
+  private static String trim(String s) {
+    return s == null ? null : s.trim();
+  }
+
+  private static long orZero(Long v) {
+    return v == null ? 0L : v;
   }
 }

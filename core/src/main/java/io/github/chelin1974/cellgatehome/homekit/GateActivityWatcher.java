@@ -1,5 +1,6 @@
 package io.github.chelin1974.cellgatehome.homekit;
 
+import io.github.chelin1974.cellgatehome.cellgate.portal.model.LogEntry;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDateTime;
@@ -15,7 +16,6 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import tools.jackson.databind.JsonNode;
 
 /**
  * Assumes a gate open when the activity log says something opened it, for hardware that cannot
@@ -50,7 +50,7 @@ public final class GateActivityWatcher {
 
   private final Map<Long, GateAccessory> gatesByPort;
   private final Duration assumeOpen;
-  private final Set<String> seen = new LinkedHashSet<>();
+  private final Set<Long> seen = new LinkedHashSet<>();
 
   /**
    * @param gatesByPort each gate's accessory, keyed by the ID of the port that opens it
@@ -67,18 +67,16 @@ public final class GateActivityWatcher {
    * @return how many gates went from not assumed open to assumed open, so the caller can record
    *     the opening before it lapses
    */
-  public synchronized int onActivity(JsonNode entries) {
-    if (entries == null || !entries.isArray()) {
+  public synchronized int onActivity(List<LogEntry> entries) {
+    if (entries == null) {
       return 0;
     }
-    List<JsonNode> list = new ArrayList<>();
-    entries.forEach(list::add);
+    List<LogEntry> list = new ArrayList<>(entries);
     int opened = 0;
     // Oldest first, so a hold followed by its release ends released.
     for (int i = list.size() - 1; i >= 0; i--) {
-      JsonNode entry = list.get(i);
-      String id = entry.path("ID").asString("");
-      if (!id.isEmpty() && !seen.add(id)) {
+      LogEntry entry = list.get(i);
+      if (entry.ID() != null && !seen.add(entry.ID())) {
         continue;
       }
       trimSeen();
@@ -89,14 +87,14 @@ public final class GateActivityWatcher {
     return opened;
   }
 
-  private boolean apply(JsonNode entry) {
-    GateAccessory gate = gatesByPort.get(entry.path("ModulePortId").asLong(0));
-    if (gate == null || !entry.path("IsSuccess").asBoolean(true)) {
+  private boolean apply(LogEntry entry) {
+    GateAccessory gate = entry.modulePortId() == null ? null : gatesByPort.get(entry.modulePortId());
+    if (gate == null || Boolean.FALSE.equals(entry.isSuccess())) {
       return false;
     }
     Instant at = loggedAt(entry);
-    String description = entry.path("Description").asString("");
-    if (at == null || description.isBlank()) {
+    String description = entry.description();
+    if (at == null || description == null || description.isBlank()) {
       return false;
     }
     String d = description.toLowerCase(Locale.ROOT);
@@ -115,9 +113,9 @@ public final class GateActivityWatcher {
   }
 
   /** {@code CreatedOn} is UTC without a zone ({@code ConvertedCreatedOn} is local time). */
-  static Instant loggedAt(JsonNode entry) {
-    String created = entry.path("CreatedOn").asString("");
-    if (created.isBlank()) {
+  static Instant loggedAt(LogEntry entry) {
+    String created = entry.createdOn();
+    if (created == null || created.isBlank()) {
       return null;
     }
     try {

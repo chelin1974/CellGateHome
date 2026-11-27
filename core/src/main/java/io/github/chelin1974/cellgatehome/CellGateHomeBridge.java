@@ -18,7 +18,7 @@ import io.github.chelin1974.cellgatehome.web.DashboardModel;
 import io.github.chelin1974.cellgatehome.web.DashboardModel.Gate;
 import io.github.chelin1974.cellgatehome.web.DashboardServer;
 import io.github.hapjava.accessories.HomekitAccessory;
-import tools.jackson.databind.JsonNode;
+import io.github.chelin1974.cellgatehome.cellgate.portal.model.LogEntry;
 import io.github.hapjava.server.HomekitAccessoryCategories;
 import io.github.hapjava.server.impl.HomekitRoot;
 import io.github.hapjava.server.impl.HomekitServer;
@@ -375,7 +375,7 @@ public final class CellGateHomeBridge implements AutoCloseable {
     if (doorbellWatcher == null && gateActivityWatcher == null) {
       return;
     }
-    JsonNode entries;
+    List<LogEntry> entries;
     try {
       entries = client.activity(ACTIVITY_COUNT);
     } catch (RuntimeException e) {

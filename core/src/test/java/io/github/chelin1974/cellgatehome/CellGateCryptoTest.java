@@ -47,23 +47,6 @@ class CellGateCryptoTest {
   }
 
   @Test
-  @DisplayName("the body wraps Data and Value; the login body has an empty Value")
-  void body() throws Exception {
-    KeyPairGenerator gen = KeyPairGenerator.getInstance("RSA");
-    gen.initialize(1024);
-    KeyPair pair = gen.generateKeyPair();
-    CellGateCrypto crypto = new CellGateCrypto(pair.getPublic());
-    tools.jackson.databind.JsonNode login =
-        new tools.jackson.databind.ObjectMapper().readTree(crypto.body("{\"a\":1}", null));
-    assertEquals("", login.path("Value").asString());
-    assertEquals("{\"a\":1}", decrypt(login.path("Data").asString(), pair.getPrivate()));
-
-    tools.jackson.databind.JsonNode withKey =
-        new tools.jackson.databind.ObjectMapper().readTree(crypto.body("{}", "sessionkey"));
-    assertEquals("sessionkey", decrypt(withKey.path("Value").asString(), pair.getPrivate()));
-  }
-
-  @Test
   @DisplayName("the portal's real public key loads")
   void portalKey() {
     assertTrue(CellGateCrypto.portal().encrypt("hello").endsWith("check"));

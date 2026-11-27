@@ -1,6 +1,6 @@
 package io.github.chelin1974.cellgatehome.homekit;
 
-import tools.jackson.databind.JsonNode;
+import io.github.chelin1974.cellgatehome.cellgate.portal.model.LogEntry;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -47,16 +47,15 @@ public final class DoorbellWatcher {
    * Feeds in the latest activity entries (newest first). Rings a doorbell for each new "someone's
    * here" entry. Returns how many rings were fired (zero while priming), for tests and logging.
    */
-  public synchronized int onActivity(JsonNode entries) {
-    if (entries == null || !entries.isArray()) {
+  public synchronized int onActivity(List<LogEntry> entries) {
+    if (entries == null) {
       return 0;
     }
     // Walk oldest-first so, when several visits arrived between polls, they ring in order.
-    List<JsonNode> list = new ArrayList<>();
-    entries.forEach(list::add);
+    List<LogEntry> list = new ArrayList<>(entries);
     int fired = 0;
     for (int i = list.size() - 1; i >= 0; i--) {
-      JsonNode entry = list.get(i);
+      LogEntry entry = list.get(i);
       String signature = signature(entry);
       if (!seen.add(signature)) {
         continue; // already handled
@@ -73,15 +72,21 @@ public final class DoorbellWatcher {
     return fired;
   }
 
-  private int ring(JsonNode entry) {
-    String location = text(entry, "InstallLocation", "Location", "ModuleName", "DeviceName");
-    GateDoorbell target = pick(location);
+  private int ring(LogEntry entry) {
+    GateDoorbell target = pick(location(entry));
     if (target == null) {
       return 0;
     }
     target.ring();
-    log.debug("doorbell fired from log entry: {}", text(entry, "Description"));
+    log.debug("doorbell fired from log entry: {}", entry.description());
     return 1;
+  }
+
+  /** The unit's location name ("Front gate"), from the entry's module. */
+  private static String location(LogEntry entry) {
+    var module = entry.module();
+    return module == null || module.propertyLocation() == null
+        ? null : module.propertyLocation().name();
   }
 
   /** The doorbell for this entry: by location match, or the sole doorbell when there is one. */
@@ -101,8 +106,8 @@ public final class DoorbellWatcher {
     return null; // ambiguous across several gates; skip rather than ring the wrong one
   }
 
-  private boolean isRing(JsonNode entry) {
-    String description = text(entry, "Description");
+  private boolean isRing(LogEntry entry) {
+    String description = entry.description();
     if (description == null) {
       return false;
     }
@@ -116,13 +121,13 @@ public final class DoorbellWatcher {
   }
 
   /** A stable fingerprint for an entry, so the same log line is never rung twice. */
-  private static String signature(JsonNode entry) {
-    String id = text(entry, "ID", "Id", "LogID", "LogId", "ModuleLogID");
-    if (id != null && !id.isBlank()) {
-      return "id:" + id;
+  private static String signature(LogEntry entry) {
+    if (entry.ID() != null) {
+      return "id:" + entry.ID();
     }
-    return text(entry, "Description") + "|" + text(entry, "ConvertedCreatedOn", "CreatedOn")
-        + "|" + text(entry, "User", "AdminUser", "InitiatedBy");
+    String who = entry.user() != null ? entry.user().name()
+        : entry.adminUser() != null ? entry.adminUser().name() : null;
+    return entry.description() + "|" + entry.createdOn() + "|" + who;
   }
 
   private void trimSeen() {
@@ -134,18 +139,5 @@ public final class DoorbellWatcher {
       it.next();
       it.remove();
     }
-  }
-
-  private static String text(JsonNode entry, String... keys) {
-    for (String key : keys) {
-      JsonNode node = entry.get(key);
-      if (node != null && !node.isNull()) {
-        String value = node.asString(null);
-        if (value != null && !value.isBlank()) {
-          return value;
-        }
-      }
-    }
-    return null;
   }
 }

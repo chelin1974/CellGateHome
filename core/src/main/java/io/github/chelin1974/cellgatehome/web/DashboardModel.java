@@ -1,6 +1,7 @@
 package io.github.chelin1974.cellgatehome.web;
 
-import tools.jackson.databind.JsonNode;
+import io.github.chelin1974.cellgatehome.cellgate.portal.model.LogEntry;
+import io.github.chelin1974.cellgatehome.cellgate.portal.model.PortImage;
 import io.github.chelin1974.cellgatehome.cellgate.CellGateClient;
 import io.github.chelin1974.cellgatehome.cellgate.Watchman;
 import io.github.chelin1974.cellgatehome.homekit.GateAccessory;
@@ -84,8 +85,8 @@ public final class DashboardModel {
     }
   }
 
-  /** The recent activity entries from CellGate. */
-  public JsonNode activity(int count) {
+  /** The recent activity entries from CellGate, newest first. */
+  public List<LogEntry> activity(int count) {
     return client.activity(count);
   }
 
@@ -106,16 +107,15 @@ public final class DashboardModel {
     if (cameraPorts.isEmpty()) {
       return List.of();
     }
-    JsonNode images = client.cameraImages(cameraPorts, timezone);
     List<Map<String, Object>> out = new ArrayList<>();
-    for (JsonNode entry : images) {
-      JsonNode data = entry.path("Data");
-      long portId = entry.path("ModulePortID").asLong();
+    for (PortImage entry : client.cameraImages(cameraPorts, timezone)) {
+      long portId = entry.modulePortID() == null ? 0L : entry.modulePortID();
+      var data = entry.data();
       Map<String, Object> m = new LinkedHashMap<>();
       m.put("portId", portId);
       m.put("name", names.getOrDefault(portId, "Camera"));
-      m.put("attachment", data.path("Attachments").asString(null));
-      m.put("takenAt", data.path("ConvertedCreatedOn").asString(null));
+      m.put("attachment", data == null ? null : data.attachments());
+      m.put("takenAt", data == null ? null : data.convertedCreatedOn());
       out.add(m);
     }
     return out;

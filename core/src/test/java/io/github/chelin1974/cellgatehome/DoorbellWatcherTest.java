@@ -3,6 +3,9 @@ package io.github.chelin1974.cellgatehome;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 
+import io.github.chelin1974.cellgatehome.cellgate.portal.ApiClient;
+import io.github.chelin1974.cellgatehome.cellgate.portal.model.LogEntry;
+import tools.jackson.core.type.TypeReference;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.node.ArrayNode;
 import tools.jackson.databind.node.ObjectNode;
@@ -18,7 +21,7 @@ import org.junit.jupiter.api.Test;
 /** The activity-log → doorbell logic: priming, matching, de-duplication and ordering. */
 class DoorbellWatcherTest {
 
-  private static final ObjectMapper MAPPER = new ObjectMapper();
+  private static final ObjectMapper MAPPER = new ApiClient().getObjectMapper();
   private final ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
 
   @AfterEach
@@ -35,18 +38,24 @@ class DoorbellWatcherTest {
         List.of(new DoorbellWatcher.Bell("Front gate", bell)), List.of("Response Picture"));
   }
 
-  /** A log page, newest first, built from (description) pairs with distinct timestamps. */
-  private ArrayNode logOf(String... descriptions) {
+  private int minute;
+
+  /**
+   * A log page, newest first, with a distinct timestamp on every entry ever made in the test,
+   * and no IDs - so it exercises the description-and-time fallback that tells entries apart.
+   * Built as JSON and read the way the generated client reads it.
+   */
+  private List<LogEntry> logOf(String... descriptions) {
     ArrayNode arr = MAPPER.createArrayNode();
-    for (int i = 0; i < descriptions.length; i++) {
+    for (String description : descriptions) {
       ObjectNode e = MAPPER.createObjectNode();
-      e.put("Description", descriptions[i]);
-      e.put("ConvertedCreatedOn", "10/23/2026 01:" + (10 + i) + ":00 pm PST");
-      e.put("User", "Guest (User)");
+      e.put("Description", description);
+      e.put("CreatedOn", "2026-10-23T13:%02d:00".formatted(minute++));
+      e.putObject("User").put("Name", "Guest");
       e.put("IsSuccess", true);
       arr.add(e);
     }
-    return arr;
+    return MAPPER.convertValue(arr, new TypeReference<List<LogEntry>>() {});
   }
 
   @Test
@@ -70,7 +79,7 @@ class DoorbellWatcherTest {
   void theSameEntryIsNeverRungTwice() {
     DoorbellWatcher w = watcher(doorbell());
     w.onActivity(logOf("Trigger Gate"));
-    ArrayNode visit = logOf("Internal Camera Response Picture", "Trigger Gate");
+    List<LogEntry> visit = logOf("Internal Camera Response Picture", "Trigger Gate");
     assertEquals(1, w.onActivity(visit));
     assertEquals(0, w.onActivity(visit)); // same page polled again
   }

@@ -1,6 +1,5 @@
 package io.github.chelin1974.cellgatehome.cellgate;
 
-import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.security.GeneralSecurityException;
 import java.security.KeyFactory;
@@ -15,8 +14,11 @@ import javax.crypto.Cipher;
  * <p>Every request body, query string and session key the portal sends is encrypted with an RSA
  * public key that ships in the portal's own JavaScript: the text is cut into 86-character
  * pieces, each piece is RSA-encrypted (PKCS#1 v1.5) and base64-encoded, and the pieces are
- * joined, each followed by the literal {@code check}. Bodies go as
- * {@code {"Data": <encrypted JSON>, "Value": <encrypted session key>}}. Replies are plain JSON.
+ * joined, each followed by the literal {@code check}. Replies are plain JSON.
+ *
+ * <p>Only the encryption lives here. Where the encrypted text goes - the {@code Data} /
+ * {@code Value} body, or the {@code request} / {@code value} query parameters - is in
+ * {@code openapi.yaml}, and {@link CellGateClient} hands it to the generated client.
  *
  * <p>This is how the portal works, not a published protocol; see the README.
  */
@@ -64,30 +66,5 @@ public final class CellGateCrypto {
       throw new IllegalStateException("could not encrypt a CellGate request", e);
     }
     return out.toString();
-  }
-
-  /** The {@code {"Data":…,"Value":…}} wrapper; {@code sessionKey} is null before sign-in. */
-  public String body(String json, String sessionKey) {
-    String data = encrypt(json);
-    String value = sessionKey == null || sessionKey.isEmpty() ? "" : encrypt(sessionKey);
-    return "{\"Data\":" + quote(data) + ",\"Value\":" + quote(value) + "}";
-  }
-
-  /** A query string: {@code request=<encrypted params>&value=<encrypted session key>}. */
-  public String query(String params, String sessionKey) {
-    StringBuilder q = new StringBuilder("request=").append(enc(encrypt(params)));
-    if (sessionKey != null && !sessionKey.isEmpty()) {
-      q.append("&value=").append(enc(encrypt(sessionKey)));
-    }
-    return q.toString();
-  }
-
-  private static String enc(String s) {
-    return URLEncoder.encode(s, StandardCharsets.UTF_8).replace("+", "%20");
-  }
-
-  /** Base64 and the word "check" need no JSON escaping, but be safe. */
-  private static String quote(String s) {
-    return "\"" + s.replace("\\", "\\\\").replace("\"", "\\\"") + "\"";
   }
 }

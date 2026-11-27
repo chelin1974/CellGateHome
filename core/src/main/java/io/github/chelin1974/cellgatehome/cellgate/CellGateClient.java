@@ -1,30 +1,55 @@
 package io.github.chelin1974.cellgatehome.cellgate;
 
-import tools.jackson.core.JacksonException;
-import tools.jackson.databind.JsonNode;
-import tools.jackson.databind.ObjectMapper;
+import io.github.chelin1974.cellgatehome.cellgate.portal.ApiClient;
+import io.github.chelin1974.cellgatehome.cellgate.portal.ApiException;
+import io.github.chelin1974.cellgatehome.cellgate.portal.api.ActionsApi;
+import io.github.chelin1974.cellgatehome.cellgate.portal.api.ActivityApi;
+import io.github.chelin1974.cellgatehome.cellgate.portal.api.DevicesApi;
+import io.github.chelin1974.cellgatehome.cellgate.portal.api.SessionApi;
+import io.github.chelin1974.cellgatehome.cellgate.portal.model.ActuationPlaintext;
+import io.github.chelin1974.cellgatehome.cellgate.portal.model.EncryptedBody;
+import io.github.chelin1974.cellgatehome.cellgate.portal.model.GetLogsPlaintext;
+import io.github.chelin1974.cellgatehome.cellgate.portal.model.LogEntry;
+import io.github.chelin1974.cellgatehome.cellgate.portal.model.LogFilter;
+import io.github.chelin1974.cellgatehome.cellgate.portal.model.LoginPlaintext;
+import io.github.chelin1974.cellgatehome.cellgate.portal.model.LoginResponse;
+import io.github.chelin1974.cellgatehome.cellgate.portal.model.PortImage;
+import io.github.chelin1974.cellgatehome.cellgate.portal.model.PortsImagePlaintext;
+import io.github.chelin1974.cellgatehome.cellgate.portal.model.PropertyLocationId;
+import java.io.File;
 import java.io.IOException;
 import java.net.URI;
 import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
-import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.time.Duration;
 import java.time.Instant;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import tools.jackson.core.JacksonException;
+import tools.jackson.databind.ObjectMapper;
 
 /**
  * Reads and controls a CellGate account the same way the TrueCloud Connect portal
  * (user.zapopen.com) does, on behalf of the account's owner.
  *
- * <p>It signs in with the account email and password, holds the returned session, and signs in
- * again when the session expires. Request bodies and query strings are encrypted with
- * {@link CellGateCrypto}; replies come back as plain JSON. Calls are made one at a time.
+ * <p>The HTTP calls and the JSON are the generated client in {@code cellgate.portal}, built from
+ * {@code openapi.yaml}. This class adds what the spec can describe but a generator cannot do:
+ *
+ * <ul>
+ *   <li><b>Encryption.</b> Every operation's real parameters are a plaintext - a record such as
+ *       {@link ActuationPlaintext} for a body, a query string for a GET - that the spec names in
+ *       {@code x-plaintext-schema} / {@code x-plaintext-query}. Here it is serialised, encrypted
+ *       with {@link CellGateCrypto}, and handed to the generated method as the
+ *       {@link EncryptedBody} or the {@code request} / {@code value} parameters it expects.
+ *   <li><b>The session.</b> Signing in, the {@code is_e} / {@code AuthToken} / {@code AuthKey}
+ *       headers on every call, and signing in again after {@link #SESSION_LIFE} or a 401.
+ *   <li><b>One host per API.</b> The portal is spread over three hosts, and the generated client
+ *       has one base URL per {@link ApiClient}, so each API gets its own.
+ * </ul>
  *
  * <p>CellGate does not publish this interface, so endpoints and payloads may change; the README
  * says more. The bridge only reads the account's own devices and triggers the owner's own gate
@@ -33,7 +58,6 @@ import org.slf4j.LoggerFactory;
 public final class CellGateClient {
 
   private static final Logger log = LoggerFactory.getLogger(CellGateClient.class);
-  private static final ObjectMapper MAPPER = new ObjectMapper();
 
   /** Service hosts, as named in the portal's configuration. */
   static final String ACCOUNTKIT = "https://accountkit-user.zapopen.com";
@@ -51,6 +75,9 @@ public final class CellGateClient {
   /** The portal re-logs in after about an hour; refresh a little sooner. */
   static final Duration SESSION_LIFE = Duration.ofMinutes(50);
 
+  /** The portal sends this on every request, and so does the client. */
+  private static final String RESPONSE_TYPE = "blob";
+
   /** Thrown when CellGate can't be reached or rejects the request. */
   public static class CellGateException extends RuntimeException {
     public CellGateException(String message) {
@@ -65,121 +92,89 @@ public final class CellGateClient {
   private final String email;
   private final String password;
   private final CellGateCrypto crypto;
-  private final HttpClient http;
-  private final Duration timeout;
+  /** Serialises plaintexts; the generated client's own mapper, so names and nulls match it. */
+  private final ObjectMapper mapper;
+
+  private final SessionApi sessionApi;
+  private final DevicesApi devicesApi;
+  private final ActionsApi actionsApi;
+  private final ActivityApi activityApi;
 
   private volatile Session session;
+  /** Location IDs for the current session, fetched once per sign-in. */
+  private volatile Map.Entry<Session, List<Long>> locationIds;
 
   /** One sign-in: the token, session key and CSRF token the portal sends on later requests. */
   record Session(String token, String key, String csrf, long userId, long accountId,
       String username, Instant since) {}
 
   public CellGateClient(String email, String password, Duration requestTimeout) {
-    this(email, password, CellGateCrypto.portal(),
-        HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build(), requestTimeout);
+    this(email, password, CellGateCrypto.portal(), requestTimeout,
+        Map.of(ACCOUNTKIT, ACCOUNTKIT, DEVICE_ACTION, DEVICE_ACTION, LOG, LOG));
   }
 
-  CellGateClient(String email, String password, CellGateCrypto crypto, HttpClient http, Duration requestTimeout) {
+  /**
+   * @param hosts where each portal host is really reached, keyed by its production URL; tests
+   *     point all three at a local server
+   */
+  CellGateClient(String email, String password, CellGateCrypto crypto, Duration requestTimeout,
+      Map<String, String> hosts) {
     this.email = email;
     this.password = password;
     this.crypto = crypto;
-    this.http = http;
-    this.timeout = requestTimeout;
+    ApiClient accountKit = apiClient(hosts.get(ACCOUNTKIT), requestTimeout);
+    this.mapper = accountKit.getObjectMapper();
+    this.sessionApi = new SessionApi(accountKit);
+    this.devicesApi = new DevicesApi(accountKit);
+    this.actionsApi = new ActionsApi(apiClient(hosts.get(DEVICE_ACTION), requestTimeout));
+    this.activityApi = new ActivityApi(apiClient(hosts.get(LOG), requestTimeout));
   }
+
+  private static ApiClient apiClient(String baseUri, Duration requestTimeout) {
+    URI uri = URI.create(baseUri);
+    ApiClient client = new ApiClient();
+    client.setHttpClientBuilder(HttpClient.newBuilder());
+    client.setConnectTimeout(Duration.ofSeconds(10));
+    client.setReadTimeout(requestTimeout);
+    client.setScheme(uri.getScheme());
+    client.setHost(uri.getHost());
+    client.setPort(uri.getPort());
+    client.setBasePath(uri.getPath());
+    return client;
+  }
+
+  // ------------------------------------------------------------------ session
 
   /** Signs in and returns who the account belongs to. Throws on a bad email or password. */
   public synchronized Session signIn() {
-    String json = MAPPER.createObjectNode().put("username", email).put("password", password).toString();
-    // Login is the one call sent without a session key (there isn't one yet).
-    JsonNode reply = postJson(ACCOUNTKIT + "/api/AccountKit/userlogin", crypto.body(json, null), null);
-
-    // The portal has wrapped the login reply differently across versions, so look for the pieces
-    // in the likely places rather than one fixed path: the body itself, or a "data"/"Data" envelope.
-    JsonNode envelope = firstObject(reply, "data", "Data");
-    JsonNode user = firstObject(reply, "user", "User");
-    if (user == null && envelope != null) {
-      user = firstObject(envelope, "user", "User");
+    LoginResponse reply;
+    try {
+      // The one call without a session: no key, so Value is empty, and the portal sends the
+      // literal "Bearer null" / "null" for the auth headers.
+      reply = sessionApi.userLogin(
+          encryptedBody(new LoginPlaintext(email, password), null),
+          RESPONSE_TYPE, "Bearer null", "null", Map.of("is_e", IS_E));
+    } catch (ApiException e) {
+      throw failure("sign-in", e);
     }
-    if (user == null && hasAny(reply, "SessionID", "ID", "AccountID")) {
-      user = reply; // the reply *is* the user object
-    }
-    if (user == null && envelope != null && hasAny(envelope, "SessionID", "ID", "AccountID")) {
-      user = envelope;
-    }
-
-    String token = firstText(reply, "AuthToken", "Token", "token", "access_token");
-    if (token == null && envelope != null) {
-      token = firstText(envelope, "AuthToken", "Token", "token", "access_token");
-    }
-    if (token == null && user != null) {
-      token = firstText(user, "AuthToken", "Token", "token", "access_token");
-    }
-
-    if (user == null || token == null) {
-      // Came back, but not in a shape we recognise. Log the structure — field names and types
-      // only, never values or tokens — so the parsing can be matched to the real reply.
-      log.error("unexpected sign-in response; its structure was: {}", describe(reply));
+    if (reply == null || reply.authToken() == null || reply.user() == null) {
+      // Came back, but not in the shape the spec records. Say which part, never the values.
+      log.error("unexpected sign-in response: token {}, user {}",
+          reply == null || reply.authToken() == null ? "missing" : "present",
+          reply == null || reply.user() == null ? "missing" : "present");
       throw new CellGateException("the CellGate sign-in was refused; check the email and password.");
     }
-
-    String key = firstText(user, "SessionID", "SessionId", "sessionId");
-    String csrf = firstText(reply, "CsrfToken", "csrfToken", "csrf");
+    var user = reply.user();
     session = new Session(
-        token,
-        key == null ? "" : key,
-        csrf == null ? "" : csrf,
-        firstLong(user, "ID", "Id", "UserID", "UserId"),
-        firstLong(user, "AccountID", "AccountId"),
-        orElse(firstText(user, "Username", "username"), email),
+        reply.authToken(),
+        Objects.requireNonNullElse(user.sessionID(), ""),
+        Objects.requireNonNullElse(reply.csrfToken(), ""),
+        orZero(user.ID()),
+        orZero(user.accountID()),
+        Objects.requireNonNullElse(user.username(), email),
         Instant.now());
     log.info("signed in to CellGate as {}", session.username());
     return session;
-  }
-
-  private static JsonNode firstObject(JsonNode node, String... keys) {
-    for (String key : keys) {
-      JsonNode v = node.get(key);
-      if (v != null && v.isObject()) {
-        return v;
-      }
-    }
-    return null;
-  }
-
-  private static boolean hasAny(JsonNode node, String... keys) {
-    for (String key : keys) {
-      if (node.hasNonNull(key)) {
-        return true;
-      }
-    }
-    return false;
-  }
-
-  private static String firstText(JsonNode node, String... keys) {
-    for (String key : keys) {
-      JsonNode v = node.get(key);
-      if (v != null && v.isValueNode() && !v.isNull()) {
-        String s = v.asString(null);
-        if (s != null && !s.isBlank()) {
-          return s;
-        }
-      }
-    }
-    return null;
-  }
-
-  private static long firstLong(JsonNode node, String... keys) {
-    for (String key : keys) {
-      JsonNode v = node.get(key);
-      if (v != null && !v.isNull()) {
-        return v.asLong();
-      }
-    }
-    return 0L;
-  }
-
-  private static String orElse(String value, String fallback) {
-    return value == null ? fallback : value;
   }
 
   private Session session() {
@@ -190,265 +185,206 @@ public final class CellGateClient {
     return s;
   }
 
+  // -------------------------------------------------------------- operations
+
   /** Every Watchman unit on the account, with its ports. */
   public List<Watchman> devices() {
-    Session s = session();
-    JsonNode modules = get(ACCOUNTKIT + "/api/Dashboard/getModules?UserId=" + s.userId() + "&AccountID=0");
-    return Watchman.parse(modules);
+    return call("getModules", s -> Watchman.from(devicesApi.getModules(
+        crypto.encrypt("UserId=" + s.userId() + "&AccountID=0"), encryptedKey(s),
+        RESPONSE_TYPE, csrf(s), headers(s))));
   }
 
   /** Opens (triggers) a gate. The unit decides how long it stays open. */
   public void triggerGate(Watchman unit, Watchman.Port gate) {
-    actuate(DEVICE_ACTION + "/api/EVOhttp/EVOWTMMomentaryActuationRequest", unit, gate);
+    call("momentaryActuation", s -> {
+      actionsApi.momentaryActuation(
+          encryptedBody(actuation(s, unit, gate), s.key()), RESPONSE_TYPE, csrf(s), headers(s));
+      return null;
+    });
     log.info("triggered gate \"{}\"", gate.name());
   }
 
   /** Asks the camera to take a fresh picture; it lands in the activity log a moment later. */
   public void takePicture(Watchman unit, Watchman.Port camera) {
-    actuate(DEVICE_ACTION + "/api/EVOhttp/EVOWTMtakePicture", unit, camera);
+    call("takePicture", s -> {
+      actionsApi.takePicture(
+          encryptedBody(actuation(s, unit, camera), s.key()), RESPONSE_TYPE, csrf(s), headers(s));
+      return null;
+    });
     log.info("asked \"{}\" to take a picture", camera.name());
   }
 
-  private void actuate(String url, Watchman unit, Watchman.Port port) {
-    Session s = session();
-    String json = MAPPER.createObjectNode()
-        .put("ModuleModemId", unit.modemId())
-        .put("DeviceSerialNumber", unit.serial())
-        .put("ModuleId", unit.id())
-        .put("ModulePortId", port.id())
-        .put("ModuleType", port.entryType())
-        .put("PortNumber", port.number())
-        .put("UserID", s.userId())
-        .put("IsFromAppTrigger", true)
-        .toString();
-    postJson(url, crypto.body(json, s.key()), s);
+  private static ActuationPlaintext actuation(Session s, Watchman unit, Watchman.Port port) {
+    return new ActuationPlaintext(unit.modemId(), unit.serial(), unit.id(), port.id(),
+        port.entryType(), port.number(), s.userId(), true);
   }
 
   /**
    * The most recent activity entries (openings, closings, codes, pictures) for the account,
-   * newest first.
+   * newest first; empty, never null.
    *
-   * <p>Sent the way the portal's dashboard sends it. Two parts are not optional, though the
-   * server never says so: {@code propertyLocationIDList}, the locations to include, and a
-   * {@code filter} object. Leave either out and the server answers {@code Count: 0} with
-   * {@code Data: null} - indistinguishable from an account with no activity, which is how an
-   * earlier version of this request went unnoticed while the doorbell never rang.
+   * <p>{@code filter} and {@code propertyLocationIDList} look optional and are not: leave either
+   * out and the server answers {@code Count: 0} - the same as an account with no activity.
    */
-  public JsonNode activity(int count) {
-    Session s = session();
-    var locations = MAPPER.createArrayNode();
-    propertyLocationIds(s).forEach(locations::add);
-    var filter = MAPPER.createObjectNode();
-    for (String key : List.of("propertyId", "portId", "accessCode", "dateStart", "dateEnd",
-        "dateStartConverted", "dateEndConverted", "StartTime", "EndTime", "PhoneNumber",
-        "CallgroupName", "ZapOpenNumber", "ActionFilterTypeString", "timezoneId")) {
-      filter.putNull(key);
-    }
-    var body = MAPPER.createObjectNode()
-        .put("page", 1)
-        .put("count", count)
-        .put("accountId", s.accountId())
-        .put("username", s.username());
-    body.set("sort", MAPPER.createArrayNode().add("CreatedOn DESC"));
-    body.set("filter", filter);
-    body.set("propertyLocationIDList", locations);
-    body.putNull("isGlobal");
-    body.putNull("isHeartBeatLogs");
-    JsonNode reply = postJson(LOG + "/api/Log/GetLogs", crypto.body(body.toString(), s.key()), s);
-    JsonNode data = reply.get("Data");
-    return data != null && data.isArray() ? data : reply.path("data");
+  public List<LogEntry> activity(int count) {
+    return call("getLogs", s -> {
+      var plaintext = new GetLogsPlaintext(1, count, s.accountId(), s.username(),
+          List.of("CreatedOn DESC"), new LogFilter(null, null, null, null, null, null, null,
+              null, null, null, null, null, null, null),
+          propertyLocationIds(s), null, null);
+      var reply = activityApi.getLogs(
+          encryptedBody(plaintext, s.key()), RESPONSE_TYPE, csrf(s), headers(s));
+      return reply == null || reply.data() == null ? List.<LogEntry>of() : reply.data();
+    });
   }
 
-  /** Location IDs for the signed-in session, fetched once per sign-in. */
-  private volatile Map.Entry<Session, List<Long>> locationIds;
-
-  /**
-   * The property locations the user can see, which the activity log is filtered by.
-   *
-   * <p>A POST whose parameters ride in the query string, so - as the portal does - the query
-   * is encrypted like a GET's and the body goes as plain JSON.
-   */
-  private List<Long> propertyLocationIds(Session s) {
+  /** The property locations the user can see, which the activity log is filtered by. */
+  private List<Long> propertyLocationIds(Session s) throws ApiException {
     var cached = locationIds;
     if (cached != null && cached.getKey() == s) {
       return cached.getValue();
     }
-    String url = encryptedUrl(
-        ACCOUNTKIT + "/api/useraccesscode/GetPropertyLocationIDs?AccountID=0&UserID=" + s.userId(), s);
-    List<Long> ids = new ArrayList<>();
-    for (JsonNode location : postJson(url, "{}", s)) {
-      long id = location.path("ID").asLong(0);
-      if (id != 0) {
-        ids.add(id);
-      }
-    }
-    List<Long> result = List.copyOf(ids);
-    locationIds = Map.entry(s, result);
-    return result;
+    List<PropertyLocationId> reply = devicesApi.getPropertyLocationIds(
+        crypto.encrypt("AccountID=0&UserID=" + s.userId()), Map.of(), encryptedKey(s),
+        RESPONSE_TYPE, csrf(s), headers(s));
+    List<Long> ids = (reply == null ? List.<PropertyLocationId>of() : reply).stream()
+        .map(PropertyLocationId::ID)
+        .filter(id -> id != null && id != 0)
+        .toList();
+    locationIds = Map.entry(s, ids);
+    return ids;
   }
 
-  /** The latest picture on each camera port, keyed by port ID, as the dashboard shows them. */
-  public JsonNode cameraImages(List<Long> cameraPortIds, Integer timezoneId) {
-    Session s = session();
-    var ids = MAPPER.createArrayNode();
-    cameraPortIds.forEach(ids::add);
-    String json = MAPPER.createObjectNode()
-        .put("TimezoneID", timezoneId == null ? 0 : timezoneId)
-        .set("ModulePortID", ids)
-        .toString();
-    return postJson(ACCOUNTKIT + "/api/Dashboard/GetPortsImage", crypto.body(json, s.key()), s);
+  /** The latest picture on each camera port, as the dashboard shows them; empty, never null. */
+  public List<PortImage> cameraImages(List<Long> cameraPortIds, Integer timezoneId) {
+    return call("getPortsImage", s -> {
+      var plaintext = new PortsImagePlaintext(timezoneId == null ? 0 : timezoneId, cameraPortIds);
+      var reply = devicesApi.getPortsImage(
+          encryptedBody(plaintext, s.key()), RESPONSE_TYPE, csrf(s), headers(s));
+      return reply == null ? List.<PortImage>of() : reply;
+    });
   }
 
   /** Fetches a stored image's bytes by its attachment name, or empty if it isn't there. */
   public Optional<byte[]> image(String attachment) {
-    Session s = session();
-    // Pass the raw query; encryptedUrl() encrypts the whole thing, so no pre-encoding here.
-    String url = LOG + "/api/Portal/LogImageUpload?filename=" + attachment;
     try {
-      HttpResponse<byte[]> response = http.send(authGet(url, s).build(), HttpResponse.BodyHandlers.ofByteArray());
-      if (response.statusCode() == 404) {
-        return Optional.empty();
-      }
-      if (response.statusCode() / 100 != 2) {
-        throw new CellGateException("CellGate answered HTTP " + response.statusCode() + " for an image");
-      }
-      return Optional.of(response.body());
-    } catch (IOException e) {
-      throw new CellGateException("could not reach CellGate for an image: " + e.getMessage(), e);
-    } catch (InterruptedException e) {
-      Thread.currentThread().interrupt();
-      throw new CellGateException("interrupted fetching an image", e);
+      return call("getLogImage", s -> {
+        // The raw name goes into the plaintext query; the whole query is encrypted, so no
+        // escaping here.
+        File file = activityApi.getLogImage(crypto.encrypt("filename=" + attachment),
+            encryptedKey(s), RESPONSE_TYPE, csrf(s), headers(s));
+        try {
+          return Optional.of(Files.readAllBytes(file.toPath()));
+        } catch (IOException e) {
+          throw new ApiException(e);
+        } finally {
+          // The generated client downloads to a temporary file; don't leave it behind.
+          if (file != null && !file.delete()) {
+            file.deleteOnExit();
+          }
+        }
+      });
+    } catch (NotFound e) {
+      return Optional.empty();
     }
   }
 
-  // --------------------------------------------------------------------- HTTP
+  // --------------------------------------------------------------- plumbing
 
-  private JsonNode get(String url) {
-    Session s = session();
-    try {
-      HttpResponse<String> response = http.send(
-          authGet(url, s).build(), HttpResponse.BodyHandlers.ofString());
-      return read(url, response.statusCode(), response.body());
-    } catch (IOException e) {
-      throw new CellGateException("could not reach CellGate: " + e.getMessage(), e);
-    } catch (InterruptedException e) {
-      Thread.currentThread().interrupt();
-      throw new CellGateException("interrupted", e);
+  @FunctionalInterface
+  private interface Call<T> {
+    T run(Session s) throws ApiException;
+  }
+
+  /** A 404, kept apart from other failures so {@link #image} can answer "not there". */
+  private static final class NotFound extends CellGateException {
+    NotFound(String message) {
+      super(message);
     }
   }
 
-  private JsonNode postJson(String url, String body, Session s) {
-    HttpRequest.Builder request = HttpRequest.newBuilder(URI.create(url))
-        .timeout(timeout)
-        .header("Content-Type", "application/json")
-        .header("Accept", "application/json")
-        .header("is_e", IS_E)
-        .header("responsetype", "blob")
-        .POST(HttpRequest.BodyPublishers.ofString(body, StandardCharsets.UTF_8));
-    request.header("AuthToken", s == null ? "Bearer null" : "Bearer " + s.token());
-    request.header("AuthKey", s == null ? "null" : s.key());
-    if (s != null && s.csrf() != null && !s.csrf().isEmpty()) {
-      request.header("x-csrf-token", s.csrf());
-    }
+  private <T> T call(String operation, Call<T> call) {
     try {
-      HttpResponse<String> response = http.send(request.build(), HttpResponse.BodyHandlers.ofString());
-      return read(url, response.statusCode(), response.body());
-    } catch (IOException e) {
-      throw new CellGateException("could not reach CellGate: " + e.getMessage(), e);
-    } catch (InterruptedException e) {
-      Thread.currentThread().interrupt();
-      throw new CellGateException("interrupted", e);
+      return call.run(session());
+    } catch (ApiException e) {
+      throw failure(operation, e);
     }
   }
 
-  private HttpRequest.Builder authGet(String url, Session s) {
-    HttpRequest.Builder request = HttpRequest.newBuilder(URI.create(encryptedUrl(url, s)))
-        .timeout(timeout)
-        .header("Accept", "application/json")
-        .header("is_e", IS_E)
-        .header("responsetype", "blob")
-        .header("AuthToken", "Bearer " + s.token())
-        .header("AuthKey", s.key());
-    if (s.csrf() != null && !s.csrf().isEmpty()) {
-      request.header("x-csrf-token", s.csrf());
+  private CellGateException failure(String operation, ApiException e) {
+    int code = e.getCode();
+    if (code == 401) {
+      session = null;
+      return new CellGateException("CellGate ended the session (HTTP 401)");
     }
-    return request.GET();
+    if (code == 404) {
+      return new NotFound("CellGate answered HTTP 404 for " + operation);
+    }
+    if (code != 0) {
+      return new CellGateException("CellGate answered HTTP " + code + " for " + operation);
+    }
+    // Code 0: the generated client wraps transport and parsing failures with no status.
+    Throwable cause = e.getCause() == null ? e : e.getCause();
+    if (cause instanceof InterruptedException) {
+      Thread.currentThread().interrupt();
+      return new CellGateException("interrupted", cause);
+    }
+    if (cause instanceof JacksonException) {
+      return new CellGateException("could not read CellGate's reply to " + operation, cause);
+    }
+    return new CellGateException("could not reach CellGate: " + cause.getMessage(), cause);
   }
 
   /**
-   * The portal does not send GET parameters in the clear: it encrypts the whole query string into a
-   * {@code request=…} value and appends the encrypted session key as {@code value=…}. A plain
-   * {@code ?UserId=…} is simply ignored by the server, which is why a signed-in account looked
-   * empty. Rewrite {@code path?query} the same way; a query-less URL is left untouched.
+   * A plaintext record as the portal's {@code {"Data":…,"Value":…}} body: its JSON encrypted,
+   * and the session key encrypted ({@code ""} before sign-in).
    */
-  private String encryptedUrl(String url, Session s) {
-    int q = url.indexOf('?');
-    if (q < 0) {
-      return url;
-    }
-    return url.substring(0, q) + "?" + crypto.query(url.substring(q + 1), s.key());
-  }
-
-  private JsonNode read(String url, int status, String body) {
-    if (status == 401) {
-      session = null;
-      throw new CellGateException("CellGate ended the session (HTTP 401)");
-    }
-    if (status / 100 != 2) {
-      throw new CellGateException("CellGate answered HTTP " + status + " for " + path(url));
-    }
+  private EncryptedBody encryptedBody(Object plaintext, String sessionKey) {
+    String json;
     try {
-      return body == null || body.isBlank() ? MAPPER.createObjectNode() : MAPPER.readTree(body);
+      json = plaintextMapper().writeValueAsString(plaintext);
     } catch (JacksonException e) {
-      throw new CellGateException("could not read CellGate's reply from " + path(url), e);
+      throw new CellGateException("could not encode a CellGate request", e);
     }
+    return new EncryptedBody(crypto.encrypt(json),
+        sessionKey == null || sessionKey.isEmpty() ? "" : crypto.encrypt(sessionKey));
   }
 
-  private static String path(String url) {
-    int i = url.indexOf("/api/");
-    return i < 0 ? url : url.substring(i);
+  /**
+   * The generated client's mapper, except that it keeps nulls.
+   *
+   * <p>The generated mapper leaves null properties out, which is right for its own bodies but
+   * wrong for a plaintext: the portal sends {@code filter}'s fields and {@code isGlobal} as
+   * explicit nulls, and that is the shape the server was checked against.
+   */
+  private ObjectMapper plaintextMapper() {
+    ObjectMapper m = plaintextMapper;
+    if (m == null) {
+      m = mapper.rebuild()
+          .changeDefaultPropertyInclusion(v -> v.withValueInclusion(
+              com.fasterxml.jackson.annotation.JsonInclude.Include.ALWAYS))
+          .build();
+      plaintextMapper = m;
+    }
+    return m;
   }
 
-  /** A compact "field:type" sketch of a JSON node, one level deep, with no values or tokens. */
-  private static String describe(JsonNode node) {
-    if (node == null || node.isNull()) {
-      return "(empty)";
-    }
-    if (node.isArray()) {
-      return "[array of " + node.size() + (node.size() > 0 ? ", first=" + describe(node.get(0)) : "") + "]";
-    }
-    if (!node.isObject()) {
-      return node.getNodeType().toString().toLowerCase(java.util.Locale.ROOT);
-    }
-    StringBuilder sb = new StringBuilder("{");
-    var fields = node.properties().iterator();
-    boolean first = true;
-    while (fields.hasNext()) {
-      var e = fields.next();
-      if (!first) {
-        sb.append(", ");
-      }
-      first = false;
-      JsonNode v = e.getValue();
-      sb.append(e.getKey()).append(':');
-      if (v.isObject()) {
-        sb.append('{');
-        var inner = v.propertyNames().iterator();
-        boolean f2 = true;
-        while (inner.hasNext()) {
-          if (!f2) {
-            sb.append(',');
-          }
-          f2 = false;
-          sb.append(inner.next());
-        }
-        sb.append('}');
-      } else if (v.isArray()) {
-        sb.append("[array]");
-      } else {
-        sb.append(v.getNodeType().toString().toLowerCase(java.util.Locale.ROOT));
-      }
-    }
-    return sb.append('}').toString();
+  private volatile ObjectMapper plaintextMapper;
+
+  /** The session key, encrypted for a {@code value} query parameter; null when there is none. */
+  private String encryptedKey(Session s) {
+    return s.key().isEmpty() ? null : crypto.encrypt(s.key());
+  }
+
+  private static String csrf(Session s) {
+    return s.csrf().isEmpty() ? null : s.csrf();
+  }
+
+  private static Map<String, String> headers(Session s) {
+    return Map.of("is_e", IS_E, "AuthToken", "Bearer " + s.token(), "AuthKey", s.key());
+  }
+
+  private static long orZero(Long v) {
+    return v == null ? 0L : v;
   }
 }

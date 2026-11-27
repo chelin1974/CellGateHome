@@ -47,6 +47,13 @@
     <!-- HAP-Java brings netty 4.1.72; pinned to a patched 4.1 release (see dependencyManagement). -->
     <netty.version>4.1.140.Final</netty.version>
     <spring-boot.version>4.1.2</spring-boot.version>
+    <!--
+      Generates the CellGate client in core from openapi.yaml. 7.27 rather than the newest:
+      the native library's Jackson 3 support is what this build needs, and 7.27 has it.
+    -->
+    <openapi-generator.version>7.27.0</openapi-generator.version>
+    <jakarta-annotation.version>3.0.0</jakarta-annotation.version>
+    <jspecify.version>1.0.0</jspecify.version>
   </properties>
 
   <dependencyManagement>
@@ -92,6 +99,16 @@
         classpath, SLF4J 2's ServiceLoader binding is never found and every log line is dropped.
       -->
       <dependency>
+        <groupId>jakarta.annotation</groupId>
+        <artifactId>jakarta.annotation-api</artifactId>
+        <version>${jakarta-annotation.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>org.jspecify</groupId>
+        <artifactId>jspecify</artifactId>
+        <version>${jspecify.version}</version>
+      </dependency>
+      <dependency>
         <groupId>org.slf4j</groupId>
         <artifactId>slf4j-api</artifactId>
         <version>${slf4j.version}</version>
@@ -123,6 +140,11 @@
           <groupId>org.apache.maven.plugins</groupId>
           <artifactId>maven-shade-plugin</artifactId>
           <version>3.6.0</version>
+        </plugin>
+        <plugin>
+          <groupId>org.openapitools</groupId>
+          <artifactId>openapi-generator-maven-plugin</artifactId>
+          <version>${openapi-generator.version}</version>
         </plugin>
       </plugins>
     </pluginManagement>
