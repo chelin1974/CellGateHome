@@ -11,7 +11,9 @@ import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -222,17 +224,67 @@ public final class CellGateClient {
     postJson(url, crypto.body(json, s.key()), s);
   }
 
-  /** The most recent activity entries (openings, closings, codes, pictures) for the account. */
+  /**
+   * The most recent activity entries (openings, closings, codes, pictures) for the account,
+   * newest first.
+   *
+   * <p>Sent the way the portal's dashboard sends it. Two parts are not optional, though the
+   * server never says so: {@code propertyLocationIDList}, the locations to include, and a
+   * {@code filter} object. Leave either out and the server answers {@code Count: 0} with
+   * {@code Data: null} - indistinguishable from an account with no activity, which is how an
+   * earlier version of this request went unnoticed while the doorbell never rang.
+   */
   public JsonNode activity(int count) {
     Session s = session();
-    String json = MAPPER.createObjectNode()
+    var locations = MAPPER.createArrayNode();
+    propertyLocationIds(s).forEach(locations::add);
+    var filter = MAPPER.createObjectNode();
+    for (String key : List.of("propertyId", "portId", "accessCode", "dateStart", "dateEnd",
+        "dateStartConverted", "dateEndConverted", "StartTime", "EndTime", "PhoneNumber",
+        "CallgroupName", "ZapOpenNumber", "ActionFilterTypeString", "timezoneId")) {
+      filter.putNull(key);
+    }
+    var body = MAPPER.createObjectNode()
         .put("page", 1)
         .put("count", count)
         .put("accountId", s.accountId())
-        .put("username", s.username())
-        .set("sort", MAPPER.createArrayNode().add("CreatedOn DESC"))
-        .toString();
-    return postJson(LOG + "/api/Log/GetLogs", crypto.body(json, s.key()), s).path("data");
+        .put("username", s.username());
+    body.set("sort", MAPPER.createArrayNode().add("CreatedOn DESC"));
+    body.set("filter", filter);
+    body.set("propertyLocationIDList", locations);
+    body.putNull("isGlobal");
+    body.putNull("isHeartBeatLogs");
+    JsonNode reply = postJson(LOG + "/api/Log/GetLogs", crypto.body(body.toString(), s.key()), s);
+    JsonNode data = reply.get("Data");
+    return data != null && data.isArray() ? data : reply.path("data");
+  }
+
+  /** Location IDs for the signed-in session, fetched once per sign-in. */
+  private volatile Map.Entry<Session, List<Long>> locationIds;
+
+  /**
+   * The property locations the user can see, which the activity log is filtered by.
+   *
+   * <p>A POST whose parameters ride in the query string, so - as the portal does - the query
+   * is encrypted like a GET's and the body goes as plain JSON.
+   */
+  private List<Long> propertyLocationIds(Session s) {
+    var cached = locationIds;
+    if (cached != null && cached.getKey() == s) {
+      return cached.getValue();
+    }
+    String url = encryptedUrl(
+        ACCOUNTKIT + "/api/useraccesscode/GetPropertyLocationIDs?AccountID=0&UserID=" + s.userId(), s);
+    List<Long> ids = new ArrayList<>();
+    for (JsonNode location : postJson(url, "{}", s)) {
+      long id = location.path("ID").asLong(0);
+      if (id != 0) {
+        ids.add(id);
+      }
+    }
+    List<Long> result = List.copyOf(ids);
+    locationIds = Map.entry(s, result);
+    return result;
   }
 
   /** The latest picture on each camera port, keyed by port ID, as the dashboard shows them. */

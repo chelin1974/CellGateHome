@@ -366,7 +366,7 @@ changing it.
 | `port` | `51829` | HomeKit port. Different from SpanHome's and DaikinHome's, so all three can run on one machine. |
 | `dashboardPort` | `8090` | Gate Board port. `0` turns it off. |
 | `dashboardPasscode` | none | Household passcode for opening the gate and taking pictures from the dashboard. |
-| `assumeOpenSeconds` | `60` | How long a gate keeps reporting open after you trigger it, when nothing measures its position. `0` turns it off. A measured state always wins. |
+| `assumeOpenSeconds` | `60` | How long a gate keeps reporting open after it is triggered - by this bridge, a keypad code, the app or a remote - when nothing measures its position. Hold-open schedules are followed until released. `0` turns all of it off. A measured state always wins. |
 | `doorbell` | `true` | Publish a HomeKit doorbell that rings on gate activity. See [The doorbell](#the-doorbell). |
 | `doorbellRingEvents` | `["Response Picture"]` | Case-insensitive substrings of a log entry's description that ring the doorbell. |
 | `prometheusUrl` | none | Prometheus 3 base URL. Turns on metrics export. |
@@ -419,10 +419,20 @@ your own account's devices, with your own credentials.
   *output* driven by a momentary relay pulse, so its "Gate Closed" text is the relay's state
   and not the gate's, and the activity log records commands rather than positions.
 
-  Without a contact, the bridge reports what it does know - that it just opened the gate -
-  for `assumeOpenSeconds` after each trigger, then goes back to Unknown. The dashboard labels
-  that **Assumed open** rather than Open, so an assumption is never shown as a measurement.
-  Apple Home has no "unknown", so its tile reads Closed once the window lapses.
+  Without a contact, the bridge reports what it does know - that something just opened the
+  gate - and goes back to Unknown afterwards. It learns that from its own triggers and from
+  the activity log, so openings from a keypad code, the CellGate app or a remote count too:
+
+  | Log entry on the gate port | Assumed open |
+  | --- | --- |
+  | `Trigger Gate` (every accepted code is followed by one) | for `assumeOpenSeconds` from when it was logged |
+  | `Gate Opened (hold for N hours)` (a hold-open schedule) | until N hours later, or until `Gate Closed` |
+  | `Gate Closed` | ends the assumption |
+
+  Times are taken from the log, so a hold that started before a restart comes back as open.
+  The dashboard labels all of this **Assumed open** rather than Open, so an assumption is never
+  shown as a measurement. Apple Home has no "unknown", so its tile reads Closed once the
+  window lapses.
 - **Checked against the Watchman EVO.** Other CellGate hardware may use different endpoints.
 
 ## Development
@@ -439,6 +449,7 @@ mvn test
 | `homekit/GateAccessory` | A gate as a HomeKit garage-door accessory |
 | `homekit/GateDoorbell` | A gate's HomeKit doorbell (programmable-switch); `ring()` fires the Home notification |
 | `homekit/DoorbellWatcher` | Turns new activity-log entries into doorbell rings (priming, matching, de-dup). **Pure.** |
+| `homekit/GateActivityWatcher` | Turns gate-port activity-log entries (triggers, holds, releases) into assumed-open windows |
 | `web/DashboardServer` | The Gate Board page, its API, passcode and home-network checks |
 | `web/DashboardModel` | What the dashboard shows and does |
 | `metrics/CellGateMetrics` | Gate state to an OTLP metrics request (pure) |
