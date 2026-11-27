@@ -6,6 +6,7 @@ import io.github.chelin1974.cellgatehome.homekit.AccessoryIds;
 import io.github.chelin1974.cellgatehome.homekit.FileAuthInfo;
 import io.github.chelin1974.cellgatehome.homekit.MdnsWatchdog;
 import io.github.chelin1974.cellgatehome.homekit.DoorbellWatcher;
+import io.github.chelin1974.cellgatehome.homekit.GateActivityWatcher;
 import io.github.chelin1974.cellgatehome.homekit.GateAccessory;
 import io.github.chelin1974.cellgatehome.homekit.GateDoorbell;
 import io.github.chelin1974.cellgatehome.homekit.HomeKitNames;
@@ -17,6 +18,7 @@ import io.github.chelin1974.cellgatehome.web.DashboardModel;
 import io.github.chelin1974.cellgatehome.web.DashboardModel.Gate;
 import io.github.chelin1974.cellgatehome.web.DashboardServer;
 import io.github.hapjava.accessories.HomekitAccessory;
+import tools.jackson.databind.JsonNode;
 import io.github.hapjava.server.HomekitAccessoryCategories;
 import io.github.hapjava.server.impl.HomekitRoot;
 import io.github.hapjava.server.impl.HomekitServer;
@@ -27,6 +29,7 @@ import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -50,8 +53,8 @@ public final class CellGateHomeBridge implements AutoCloseable {
 
   private static final Logger log = LoggerFactory.getLogger(CellGateHomeBridge.class);
   private static final int FIRST_ACCESSORY_ID = 2;
-  /** How many recent log entries to scan for doorbell events on each poll. */
-  private static final int DOORBELL_ACTIVITY_COUNT = 20;
+  /** How many recent log entries to scan for doorbell rings and gate openings on each poll. */
+  private static final int ACTIVITY_COUNT = 20;
 
   private final CellGateConfig config;
   private final CellGateClient client;
@@ -78,6 +81,7 @@ public final class CellGateHomeBridge implements AutoCloseable {
   // assigns it on another.
   private volatile OtlpExporter exporter;
   private DoorbellWatcher doorbellWatcher;
+  private GateActivityWatcher gateActivityWatcher;
   private volatile boolean running;
 
   /** How often the post-open watch reads the portal; see {@link #watchAfterOpen()}. */
@@ -188,6 +192,11 @@ public final class CellGateHomeBridge implements AutoCloseable {
     if (config.doorbell() && !bells.isEmpty()) {
       doorbellWatcher = new DoorbellWatcher(bells, config.doorbellRingEvents());
     }
+    if (!config.assumeOpen().isZero()) {
+      Map<Long, GateAccessory> byPort = new HashMap<>();
+      gateHandles.forEach(h -> byPort.put(h.gatePortId(), h.accessory()));
+      gateActivityWatcher = new GateActivityWatcher(byPort, config.assumeOpen());
+    }
 
     accessories.forEach(bridge::addAccessory);
     ids.save();
@@ -199,6 +208,10 @@ public final class CellGateHomeBridge implements AutoCloseable {
         config.bridgeName(), address.getHostAddress(), config.port(), accessories.size());
     if (doorbellWatcher != null) {
       log.info("doorbell on: Home will notify when the gate logs {}", config.doorbellRingEvents());
+    }
+    if (gateActivityWatcher != null) {
+      log.info("openings from the keypad, app and schedules count as open for {}s; holds until released",
+          config.assumeOpen().toSeconds());
     }
 
     if (!authInfo.hasUser()) {
@@ -260,7 +273,7 @@ public final class CellGateHomeBridge implements AutoCloseable {
       noteFirstMeasuredReading(h, measured);
       h.accessory().updateOpen(measured);
     }
-    ringDoorbells();
+    readActivity();
   }
 
   /**
@@ -354,18 +367,30 @@ public final class CellGateHomeBridge implements AutoCloseable {
     }
   }
 
-  /** Reads recent activity and rings a doorbell for each new "someone's at the gate" entry. */
-  private void ringDoorbells() {
-    if (doorbellWatcher == null) {
+  /**
+   * Reads recent activity once and hands it to whoever needs it: the doorbell, for "someone's
+   * at the gate" entries, and the gate watcher, for openings the bridge did not send itself.
+   */
+  private void readActivity() {
+    if (doorbellWatcher == null && gateActivityWatcher == null) {
       return;
     }
+    JsonNode entries;
     try {
-      int fired = doorbellWatcher.onActivity(client.activity(DOORBELL_ACTIVITY_COUNT));
+      entries = client.activity(ACTIVITY_COUNT);
+    } catch (RuntimeException e) {
+      log.warn("could not read the activity log: {}", e.getMessage());
+      return;
+    }
+    if (doorbellWatcher != null) {
+      int fired = doorbellWatcher.onActivity(entries);
       if (fired > 0) {
         log.debug("rang the doorbell {} time(s) from new gate activity", fired);
       }
-    } catch (RuntimeException e) {
-      log.warn("could not read the activity log for the doorbell: {}", e.getMessage());
+    }
+    if (gateActivityWatcher != null && gateActivityWatcher.onActivity(entries) > 0) {
+      log.info("a gate was opened from outside this bridge; assuming it open");
+      pushMetricsSoon();
     }
   }
 

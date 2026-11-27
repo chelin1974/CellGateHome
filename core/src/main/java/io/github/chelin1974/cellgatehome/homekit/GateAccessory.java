@@ -61,6 +61,7 @@ public final class GateAccessory implements GarageDoorOpenerAccessory {
   private final Duration assumeOpenFor;
 
   private volatile Instant assumedOpenUntil = Instant.EPOCH;
+  private volatile Instant assumedOpenSince = Instant.EPOCH;
 
   public GateAccessory(int id, String name, String serial, String firmware, Trigger trigger,
       ScheduledExecutorService scheduler) {
@@ -128,6 +129,54 @@ public final class GateAccessory implements GarageDoorOpenerAccessory {
     return Instant.now().isBefore(assumedOpenUntil);
   }
 
+  /**
+   * Assumes the gate open from {@code since} until {@code until}: something opened it - this
+   * bridge, a keypad code, the app, a hold-open schedule - and nothing measures where it is.
+   *
+   * <p>Only ever lengthens the current window, so a short opening seen late cannot cut short a
+   * hold that is still running. A measured reading still wins over all of it.
+   *
+   * @return true when the gate was not assumed open before and now is
+   */
+  public synchronized boolean assumeOpen(Instant since, Instant until) {
+    if (!until.isAfter(assumedOpenUntil)) {
+      return false;
+    }
+    boolean was = withinAssumedWindow();
+    assumedOpenSince = since;
+    assumedOpenUntil = until;
+    long delay = Duration.between(Instant.now(), until).toMillis();
+    if (delay <= 0) {
+      return false; // already over by the time it was heard about
+    }
+    if (!was) {
+      fire(onCurrent);
+      fire(onTarget);
+    }
+    // Fire again when the assumption lapses, or Home would sit on a stale "open" until
+    // something else happened to prod it.
+    scheduler.schedule(() -> {
+      fire(onCurrent);
+      fire(onTarget);
+    }, delay + 500, TimeUnit.MILLISECONDS);
+    return !was;
+  }
+
+  /**
+   * Ends the assumed-open window because the gate was told to close at {@code at}.
+   *
+   * <p>Ignored for an opening that began after {@code at}, so a close command read late from
+   * the activity log cannot cancel an opening that came after it.
+   */
+  public synchronized void endAssumedOpen(Instant at) {
+    if (at.isBefore(assumedOpenSince) || !withinAssumedWindow()) {
+      return;
+    }
+    assumedOpenUntil = Instant.EPOCH;
+    fire(onCurrent);
+    fire(onTarget);
+  }
+
   // ------------------------------------------------------------- door state
 
   @Override
@@ -184,13 +233,8 @@ public final class GateAccessory implements GarageDoorOpenerAccessory {
     // The gate is open now. On hardware that reports a position the next poll says so and
     // that wins; on hardware that never does, this is the only thing that will.
     if (!assumeOpenFor.isZero()) {
-      assumedOpenUntil = Instant.now().plus(assumeOpenFor);
-      // Fire again when the assumption lapses, or Home would sit on a stale "open" until
-      // something else happened to prod it.
-      scheduler.schedule(() -> {
-        fire(onCurrent);
-        fire(onTarget);
-      }, assumeOpenFor.toMillis() + 500, TimeUnit.MILLISECONDS);
+      Instant now = Instant.now();
+      assumeOpen(now, now.plus(assumeOpenFor));
     }
     // When the window ends, fall back to the real polled state.
     scheduler.schedule(() -> {
