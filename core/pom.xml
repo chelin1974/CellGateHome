@@ -34,6 +34,16 @@
       <artifactId>slf4j-api</artifactId>
     </dependency>
 
+    <!-- Annotations the generated portal client uses (@Generated, @Nullable, @Nonnull). -->
+    <dependency>
+      <groupId>jakarta.annotation</groupId>
+      <artifactId>jakarta.annotation-api</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.jspecify</groupId>
+      <artifactId>jspecify</artifactId>
+    </dependency>
+
     <dependency>
       <groupId>org.slf4j</groupId>
       <artifactId>slf4j-simple</artifactId>
@@ -46,4 +56,82 @@
       <scope>test</scope>
     </dependency>
   </dependencies>
+
+  <build>
+    <plugins>
+      <!--
+        The CellGate portal client, generated from ../openapi.yaml at build time. It does the
+        HTTP and the JSON; cellgate/CellGateClient wraps it with what a generator cannot know:
+        the request encryption, the session headers and signing in again.
+
+        Two generators, because no single one does both halves well. The Java client generator
+        has no record support, and Spring's (useRecords) has no plain HttpClient client. So
+        Spring's makes the models, as records, and the native client generator makes the API
+        classes and the plumbing, pointed at the same model package.
+      -->
+      <plugin>
+        <groupId>org.openapitools</groupId>
+        <artifactId>openapi-generator-maven-plugin</artifactId>
+        <configuration>
+          <inputSpec>${project.basedir}/../openapi.yaml</inputSpec>
+          <apiPackage>io.github.chelin1974.cellgatehome.cellgate.portal.api</apiPackage>
+          <modelPackage>io.github.chelin1974.cellgatehome.cellgate.portal.model</modelPackage>
+          <invokerPackage>io.github.chelin1974.cellgatehome.cellgate.portal</invokerPackage>
+          <generateApiTests>false</generateApiTests>
+          <generateModelTests>false</generateModelTests>
+          <generateApiDocumentation>false</generateApiDocumentation>
+          <generateModelDocumentation>false</generateModelDocumentation>
+        </configuration>
+        <executions>
+          <execution>
+            <id>cellgate-portal-models</id>
+            <goals>
+              <goal>generate</goal>
+            </goals>
+            <configuration>
+              <generatorName>spring</generatorName>
+              <output>${project.build.directory}/generated-sources/portal-models</output>
+              <generateApis>false</generateApis>
+              <generateSupportingFiles>false</generateSupportingFiles>
+              <configOptions>
+                <useRecords>true</useRecords>
+                <!-- JSpecify's @Nullable rather than Spring's: core has no Spring. -->
+                <useJspecify>true</useJspecify>
+                <generateJsonIncludeAnnotations>false</generateJsonIncludeAnnotations>
+                <generateJsonSetterNullsAnnotations>false</generateJsonSetterNullsAnnotations>
+                <useSpringBoot4>true</useSpringBoot4>
+                <useJackson3>true</useJackson3>
+                <useBeanValidation>false</useBeanValidation>
+                <openApiNullable>false</openApiNullable>
+                <documentationProvider>none</documentationProvider>
+                <annotationLibrary>none</annotationLibrary>
+                <hideGenerationTimestamp>true</hideGenerationTimestamp>
+                <sourceFolder>src/main/java</sourceFolder>
+              </configOptions>
+            </configuration>
+          </execution>
+          <execution>
+            <id>cellgate-portal-client</id>
+            <goals>
+              <goal>generate</goal>
+            </goals>
+            <configuration>
+              <generatorName>java</generatorName>
+              <library>native</library>
+              <output>${project.build.directory}/generated-sources/portal-client</output>
+              <generateModels>false</generateModels>
+              <configOptions>
+                <useJackson3>true</useJackson3>
+                <useJakartaEe>true</useJakartaEe>
+                <openApiNullable>false</openApiNullable>
+                <annotationLibrary>none</annotationLibrary>
+                <hideGenerationTimestamp>true</hideGenerationTimestamp>
+                <sourceFolder>src/main/java</sourceFolder>
+              </configOptions>
+            </configuration>
+          </execution>
+        </executions>
+      </plugin>
+    </plugins>
+  </build>
 </project>

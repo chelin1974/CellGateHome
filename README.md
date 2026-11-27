@@ -399,6 +399,8 @@ There is no published CellGate API. The bridge reproduces what the TrueCloud Con
 - It reads your units (`Dashboard/getModules`), opens the gate
   (`EVOhttp/EVOWTMMomentaryActuationRequest`), takes a picture (`EVOhttp/EVOWTMtakePicture`), and
   reads the activity log and camera images.
+- Every call is described in [`openapi.yaml`](openapi.yaml), with how sure each part is, and
+  the client is generated from it at build time.
 
 Because none of this is documented, CellGate may change it at any time. The bridge only acts on
 your own account's devices, with your own credentials.
@@ -448,11 +450,21 @@ your own account's devices, with your own credentials.
 mvn test
 ```
 
+The CellGate client is generated from [`openapi.yaml`](openapi.yaml) into
+`core/target/generated-sources` on every build, so change the API there, not in Java. Two
+generators run, because neither does both halves: Spring's makes the models as Java records
+(`useRecords`), and the native Java client generator makes the API classes over Java's own
+`HttpClient`. Both use Jackson 3, like the rest of the build. What a generator cannot do -
+encrypting each call's plaintext, the session headers, signing in again - is
+`cellgate/CellGateClient`, on top.
+
 | Path | What it does |
 | --- | --- |
 | `cellgate/CellGateCrypto` | The portal's request encryption (RSA, chunked). **Pure.** |
 | `cellgate/Watchman` | Model of a unit and its ports, parsed from `getModules`. **Pure.** |
-| `cellgate/CellGateClient` | Signs in and makes the portal's calls |
+| `openapi.yaml` | The portal API: every call, its plaintext, and how sure each part is. The client is generated from it |
+| `cellgate/portal` (generated) | API classes and model records, built from `openapi.yaml` |
+| `cellgate/CellGateClient` | The generated client plus encryption, session headers and signing in again |
 | `homekit/GateAccessory` | A gate as a HomeKit garage-door accessory |
 | `homekit/GateDoorbell` | A gate's HomeKit doorbell (programmable-switch); `ring()` fires the Home notification |
 | `homekit/DoorbellWatcher` | Turns new activity-log entries into doorbell rings (priming, matching, de-dup). **Pure.** |

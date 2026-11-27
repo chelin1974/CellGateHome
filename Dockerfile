@@ -5,6 +5,8 @@ FROM maven:3.10-eclipse-temurin-27 AS build
 WORKDIR /src
 
 COPY pom.xml ./
+# The CellGate client is generated from this at build time (core/pom.xml).
+COPY openapi.yaml ./
 COPY core core
 COPY cli cli
 COPY web web

@@ -1,0 +1,692 @@
+openapi: 3.1.0
+info:
+  title: CellGate TrueCloud Connect portal API (unofficial)
+  version: 0.1.0-unofficial
+  summary: The private HTTP API behind user.zapopen.com, as the CellGateHome bridge calls it.
+  description: |
+    **Unofficial. Not published or supported by CellGate.** Reverse-engineered from the
+    portal's behaviour and its JavaScript, and checked against a live Watchman EVO account.
+    Endpoints and payloads can change without notice.
+
+    This file is the source of truth for CellGateHome's client: the build generates it from
+    here (`core/pom.xml`), and `CellGateClient.java` adds the encryption and the session on
+    top. Change the API here first.
+
+    ## Evidence levels
+    Every operation and schema carries `x-evidence`:
+    - `observed`: sent or read by the client and covered by its tests or fixtures.
+    - `client-assumed`: the client sends or reads it this way, but nothing in the repo proves the
+      server's exact shape (for example, the client tolerates several shapes).
+    - `unknown`: the client ignores it, so the shape is not known.
+
+    ## Request encryption (applies to every operation)
+    The portal never sends parameters in the clear. Plain text is encrypted with the RSA public
+    key embedded in the portal's JavaScript (`x-cellgate-crypto` below):
+
+    1. Cut the plain text into pieces of **86 UTF-16 characters** (Java `String.substring`).
+    2. Encrypt each piece's UTF-8 bytes with RSA/ECB/PKCS1Padding (1024-bit key, so each piece
+       must be ≤ 117 bytes after UTF-8 encoding). 86 ASCII characters always fit. A piece with
+       many non-ASCII characters can go over the limit, and the client then fails (for example,
+       59 or more `é` in a row). An emoji split across a piece boundary gets corrupted. Whether
+       the portal's own JavaScript has the same limits is unknown.
+    3. Base64 each ciphertext (always 172 characters, ending in `=`) and append the literal
+       `check`.
+    4. Concatenate. Empty text encrypts to the empty string.
+
+    **POST bodies** are `{"Data": enc(<JSON>), "Value": enc(<session key>)}`. `Value` is `""`
+    at sign-in. Each operation's `x-plaintext-schema` names the schema of the JSON that goes
+    inside `Data`.
+
+    **GET query strings** are replaced in full by
+    `request=urlencode(enc(<plain query>))&value=urlencode(enc(<session key>))`. The server
+    ignores a plain query such as `?UserId=…`. Each operation's `x-plaintext-query` gives the
+    plain query.
+
+    **Responses are plain JSON** (or raw bytes for images). Nothing in them is encrypted.
+
+    ## Session
+    `POST /api/AccountKit/userlogin` returns a token (`AuthToken`) and the user, whose
+    `SessionID` is the session key. Later calls send them as the `AuthToken: Bearer <token>`, `AuthKey: <SessionID>`
+    and (when one was issued) `x-csrf-token` headers, and the session key also goes encrypted in
+    `Value` / `value`. The portal signs in again after about an hour (the client refreshes at
+    50 minutes). A `401` means the session has ended and you need to sign in again.
+
+    **Code generators:** pass the raw base64-and-`check` text as the `request` / `value` query
+    parameters and let the tool percent-encode it. Don't encode it yourself first, or it will
+    be encoded twice.
+
+    Every request also carries the fixed `is_e` client key and `responsetype: blob`.
+  x-source: https://github.com/chelin1974/CellGateHome
+
+x-cellgate-crypto:
+  algorithm: RSA/ECB/PKCS1Padding
+  keySizeBits: 1024
+  chunkChars: 86
+  maxChunkBytes: 117
+  chunkSeparator: check
+  publicKeyX509Base64: >-
+    MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDObZtjxfplZYRgo6TKZM9E6b3RVQpXTpKTOiqefTKEpT9//ru1x0rHgqpsjcw1BoXFX3SuYRPn3ijCM/C9WHnc2PDjEgGu0KezIxvqE7nCjbHed7pff6fov6ZajFsiwcf2r3oOwCjWMW1ChHP0ZYF2Ai1HmInarJutHTwE+Elb3QIDAQAB
+  isE: >-
+    R3rcMGRoRsCuiU5TkzxTrUvPzihGQBr5h96aApNMALcRKxmjZ2Sg1MsH9gZva7zKA8n5p9qN0kSj4488LYW4X2FZDkCx4f8wbYGn8G7Ps69Cyd5vhQgtdL2wqBO4KW53tmXKlEb0Pjh/MY2gRcxB87KuTBWpxIeAo7SkOMMRAcE=
+
+servers:
+  - url: https://accountkit-user.zapopen.com
+    description: AccountKit (sign-in, dashboard). Operations on other hosts override this.
+
+tags:
+  - name: Session
+  - name: Devices
+  - name: Actions
+  - name: Activity
+
+security:
+  - isE: []
+    authToken: []
+    authKey: []
+
+paths:
+  /api/AccountKit/userlogin:
+    post:
+      tags: [Session]
+      operationId: userLogin
+      summary: Sign in with the account email and password
+      description: |
+        The only call made without a session. Besides `is_e`, the client sends the literal
+        headers `AuthToken: Bearer null` and `AuthKey: null` (copied from the portal); nothing
+        shows whether the server needs them. `Value` is the empty string.
+      x-evidence: observed
+      x-plaintext-schema: '#/components/schemas/LoginPlaintext'
+      security:
+        - isE: []
+      parameters:
+        - $ref: '#/components/parameters/ResponseType'
+        - name: AuthToken
+          in: header
+          required: false
+          description: The portal sends the literal `Bearer null` before sign-in.
+          schema: { type: string, const: Bearer null }
+        - name: AuthKey
+          in: header
+          required: false
+          description: The portal sends the literal `null` before sign-in.
+          schema: { type: string, const: 'null' }
+      requestBody:
+        description: '`Value` is the empty string: there is no session key yet.'
+        $ref: '#/components/requestBodies/Encrypted'
+      responses:
+        '200':
+          description: Signed in. See `LoginResponse` for how loosely the shape is known.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LoginResponse' }
+        default: { $ref: '#/components/responses/Error' }
+
+  /api/Dashboard/getModules:
+    get:
+      tags: [Devices]
+      operationId: getModules
+      summary: List the account's Watchman units and their ports
+      x-evidence: observed
+      x-plaintext-query: UserId={userId}&AccountID=0
+      x-plaintext-query-notes: >-
+        `userId` is the signed-in user's `ID` from the login reply. The client always sends
+        `AccountID=0`.
+      parameters:
+        - $ref: '#/components/parameters/EncryptedRequest'
+        - $ref: '#/components/parameters/EncryptedValue'
+        - $ref: '#/components/parameters/ResponseType'
+        - $ref: '#/components/parameters/CsrfToken'
+      responses:
+        '200':
+          description: Every unit on the account.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Module' }
+        '401': { $ref: '#/components/responses/SessionEnded' }
+        default: { $ref: '#/components/responses/Error' }
+
+  /api/useraccesscode/GetPropertyLocationIDs:
+    post:
+      tags: [Devices]
+      operationId: getPropertyLocationIds
+      summary: The property locations the user can see
+      description: |
+        `getLogs` filters by these and answers nothing without them. A POST whose parameters
+        ride in the query string: as the portal does it, the query is encrypted exactly like a
+        GET's and the body goes as plain, unencrypted JSON (`{}`).
+      x-evidence: observed
+      x-plaintext-query: AccountID=0&UserID={userId}
+      x-plaintext-query-notes: >-
+        `userId` is the signed-in user's `ID`. The portal's dashboard sends `AccountID=0`.
+      parameters:
+        - $ref: '#/components/parameters/EncryptedRequest'
+        - $ref: '#/components/parameters/EncryptedValue'
+        - $ref: '#/components/parameters/ResponseType'
+        - $ref: '#/components/parameters/CsrfToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              description: Always `{}`, sent unencrypted.
+      responses:
+        '200':
+          description: One entry per location.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/PropertyLocationId' }
+        '401': { $ref: '#/components/responses/SessionEnded' }
+        default: { $ref: '#/components/responses/Error' }
+
+  /api/Dashboard/GetPortsImage:
+    post:
+      tags: [Devices]
+      operationId: getPortsImage
+      summary: Latest stored picture for each camera port
+      x-evidence: client-assumed
+      x-plaintext-schema: '#/components/schemas/PortsImagePlaintext'
+      parameters:
+        - $ref: '#/components/parameters/ResponseType'
+        - $ref: '#/components/parameters/CsrfToken'
+      requestBody: { $ref: '#/components/requestBodies/Encrypted' }
+      responses:
+        '200':
+          description: One entry per camera port that has a picture.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/PortImage' }
+        '401': { $ref: '#/components/responses/SessionEnded' }
+        default: { $ref: '#/components/responses/Error' }
+
+  /api/EVOhttp/EVOWTMMomentaryActuationRequest:
+    servers:
+      - url: https://deviceaction.zapopen.com
+    post:
+      tags: [Actions]
+      operationId: momentaryActuation
+      summary: Trigger (open) a gate output port
+      description: >-
+        Pulses the gate relay. The unit decides how long the gate stays open. Checked only on
+        the Watchman EVO.
+      x-evidence: observed
+      x-plaintext-schema: '#/components/schemas/ActuationPlaintext'
+      parameters:
+        - $ref: '#/components/parameters/ResponseType'
+        - $ref: '#/components/parameters/CsrfToken'
+      requestBody: { $ref: '#/components/requestBodies/Encrypted' }
+      responses:
+        '200': { $ref: '#/components/responses/Ignored' }
+        '401': { $ref: '#/components/responses/SessionEnded' }
+        default: { $ref: '#/components/responses/Error' }
+
+  /api/EVOhttp/EVOWTMtakePicture:
+    servers:
+      - url: https://deviceaction.zapopen.com
+    post:
+      tags: [Actions]
+      operationId: takePicture
+      summary: Ask a camera port to take a picture
+      description: >-
+        The picture is not returned. It shows up a moment later in the activity log and in
+        `getPortsImage`.
+      x-evidence: observed
+      x-plaintext-schema: '#/components/schemas/ActuationPlaintext'
+      parameters:
+        - $ref: '#/components/parameters/ResponseType'
+        - $ref: '#/components/parameters/CsrfToken'
+      requestBody: { $ref: '#/components/requestBodies/Encrypted' }
+      responses:
+        '200': { $ref: '#/components/responses/Ignored' }
+        '401': { $ref: '#/components/responses/SessionEnded' }
+        default: { $ref: '#/components/responses/Error' }
+
+  /api/Log/GetLogs:
+    servers:
+      - url: https://log.zapopen.com
+    post:
+      tags: [Activity]
+      operationId: getLogs
+      summary: Recent activity (openings, codes, pictures), newest first
+      description: >-
+        Answers `Count: 0, Data: null` - indistinguishable from an account with no activity -
+        unless the plaintext carries `propertyLocationIDList` (from `getPropertyLocationIds`)
+        and a `filter` object.
+      x-evidence: observed
+      x-plaintext-schema: '#/components/schemas/GetLogsPlaintext'
+      parameters:
+        - $ref: '#/components/parameters/ResponseType'
+        - $ref: '#/components/parameters/CsrfToken'
+      requestBody: { $ref: '#/components/requestBodies/Encrypted' }
+      responses:
+        '200':
+          description: A page of log entries.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/GetLogsResponse' }
+        '401': { $ref: '#/components/responses/SessionEnded' }
+        default: { $ref: '#/components/responses/Error' }
+
+  /api/Portal/LogImageUpload:
+    servers:
+      - url: https://log.zapopen.com
+    get:
+      tags: [Activity]
+      operationId: getLogImage
+      summary: Download a stored image by attachment name
+      description: >-
+        Despite the name, this is a GET that downloads. The attachment name comes from
+        `PortImage.Data.Attachments`. The client puts it into the plain query without encoding,
+        since the whole query is encrypted. A name containing `&`, `=` or `%` would probably
+        be misread by the server once it decrypts the query. No such name has been seen.
+      x-evidence: observed
+      x-plaintext-query: filename={attachment}
+      parameters:
+        - $ref: '#/components/parameters/EncryptedRequest'
+        - $ref: '#/components/parameters/EncryptedValue'
+        - $ref: '#/components/parameters/ResponseType'
+        - $ref: '#/components/parameters/CsrfToken'
+      responses:
+        '200':
+          description: >-
+            The image bytes. The client reads them as an opaque byte array and the bridge serves
+            them as `image/jpeg`. The server's own `Content-Type` was not recorded.
+          content:
+            application/octet-stream:
+              schema: { type: string, format: binary }
+        '401': { $ref: '#/components/responses/SessionEnded' }
+        '404':
+          description: No image with that name.
+        default: { $ref: '#/components/responses/Error' }
+
+components:
+  securitySchemes:
+    isE:
+      type: apiKey
+      in: header
+      name: is_e
+      description: >-
+        A fixed client key from the portal's config (`Is_E`), the same for everyone. The value
+        is in `x-cellgate-crypto.isE`. Without it the services treat the request as
+        unauthenticated.
+    authToken:
+      type: apiKey
+      in: header
+      name: AuthToken
+      description: >-
+        `Bearer <token>`, using the token from the login reply. This is a custom header, not
+        `Authorization`.
+    authKey:
+      type: apiKey
+      in: header
+      name: AuthKey
+      description: The session key (`SessionID` from the login reply), in plain text.
+
+  parameters:
+    ResponseType:
+      name: responsetype
+      in: header
+      required: false
+      description: >-
+        The portal always sends `blob` and so does the client. Not known to be required.
+      schema: { type: string, const: blob }
+    CsrfToken:
+      name: x-csrf-token
+      in: header
+      required: false
+      description: Sent only when the login reply had a `CsrfToken`.
+      schema: { type: string }
+    EncryptedRequest:
+      name: request
+      in: query
+      required: true
+      description: >-
+        The operation's whole plain query (`x-plaintext-query`), encrypted (see the top-level
+        description) and URL-encoded.
+      schema: { $ref: '#/components/schemas/EncryptedText' }
+    EncryptedValue:
+      name: value
+      in: query
+      required: false
+      description: >-
+        The session key, encrypted and URL-encoded. The client leaves it out only when it has no
+        session key.
+      schema: { $ref: '#/components/schemas/EncryptedText' }
+
+  requestBodies:
+    Encrypted:
+      required: true
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/EncryptedBody' }
+
+  responses:
+    Ignored:
+      description: >-
+        Accepted. The body is ignored and may be empty, so it is not described: a generated
+        client then reads nothing rather than failing on an empty reply.
+      x-evidence: unknown
+    SessionEnded:
+      description: The session has ended. Sign in again.
+    Error:
+      description: >-
+        Any other non-2xx status. The body's shape is not known; the client only reports the
+        status.
+
+  schemas:
+    EncryptedText:
+      type: string
+      description: >-
+        Zero or more chunks, each a 172-character base64 RSA ciphertext followed by `check`.
+        In a query string it is also URL-encoded, so `+`, `/` and `=` appear as `%2B`, `%2F` and
+        `%3D`; the pattern applies before URL-encoding.
+      pattern: '^(?:[A-Za-z0-9+/]{171}=check)*$'
+      examples: ['']
+
+    EncryptedBody:
+      type: object
+      description: The wrapper every POST body uses.
+      required: [Data, Value]
+      properties:
+        Data:
+          allOf: [{ $ref: '#/components/schemas/EncryptedText' }]
+          description: The operation's plain JSON (`x-plaintext-schema`), encrypted.
+        Value:
+          allOf: [{ $ref: '#/components/schemas/EncryptedText' }]
+          description: The session key, encrypted. `""` at sign-in.
+      additionalProperties: false
+
+    # ---------------------------------------------------------------- plaintexts (inside Data)
+
+    LoginPlaintext:
+      type: object
+      x-evidence: observed
+      required: [username, password]
+      properties:
+        username: { type: string, description: The account email. }
+        password: { type: string, format: password }
+      additionalProperties: false
+
+    ActuationPlaintext:
+      type: object
+      description: >-
+        Identifies one port on one unit. Every value comes from `getModules`. Note the casing:
+        the request says `ModuleModemId` / `ModulePortId` where the response says
+        `ModuleModemID` / `ID`.
+      x-evidence: observed
+      required:
+        - ModuleModemId
+        - DeviceSerialNumber
+        - ModuleId
+        - ModulePortId
+        - ModuleType
+        - PortNumber
+        - UserID
+        - IsFromAppTrigger
+      properties:
+        ModuleModemId: { type: integer, format: int64, description: '`Module.ModuleModemID`' }
+        DeviceSerialNumber: { type: string, description: '`Module.DeviceSerialNumber`' }
+        ModuleId: { type: integer, format: int64, description: '`Module.ID`' }
+        ModulePortId: { type: integer, format: int64, description: '`ModulePort.ID`' }
+        ModuleType:
+          type: string
+          description: >-
+            The port's `EntryType.Name` (for example `Gate` or `Camera`), despite the name.
+          examples: [Gate, Camera]
+        PortNumber: { type: string, description: '`ModulePort.PortNumber`', examples: ['01', '11'] }
+        UserID: { type: integer, format: int64, description: The signed-in user's ID. }
+        IsFromAppTrigger: { type: boolean, description: Always true. }
+      additionalProperties: false
+
+    GetLogsPlaintext:
+      type: object
+      x-evidence: observed
+      description: The shape the portal's dashboard sends. `filter` and `propertyLocationIDList` are required in practice.
+      required: [page, count, accountId, username, sort, filter, propertyLocationIDList]
+      properties:
+        page: { type: integer, minimum: 1, description: 'The client always asks for page 1.' }
+        count: { type: integer, minimum: 1 }
+        accountId: { type: integer, format: int64, description: '`AccountID` from the login reply (0 if it had none).' }
+        username: { type: string, description: 'The `Username` from the login reply, or the sign-in email if it had none.' }
+        sort:
+          type: array
+          items: { type: string }
+          examples: [['CreatedOn DESC']]
+        filter: { $ref: '#/components/schemas/LogFilter' }
+        propertyLocationIDList:
+          type: array
+          description: Every `ID` from `getPropertyLocationIds`.
+          items: { type: integer, format: int64 }
+        isGlobal: { type: [boolean, 'null'], description: The portal sends null. }
+        isHeartBeatLogs: { type: [boolean, 'null'], description: The portal sends null. }
+      additionalProperties: false
+
+    LogFilter:
+      type: object
+      x-evidence: observed
+      description: >-
+        The dashboard's filter. Every field null means "no filter"; the object itself must be
+        present.
+      properties:
+        propertyId: { type: [integer, 'null'], format: int64 }
+        portId: { type: [integer, 'null'], format: int64 }
+        accessCode: { type: [string, 'null'] }
+        dateStart: { type: [string, 'null'] }
+        dateEnd: { type: [string, 'null'] }
+        dateStartConverted: { type: [string, 'null'] }
+        dateEndConverted: { type: [string, 'null'] }
+        StartTime: { type: [string, 'null'] }
+        EndTime: { type: [string, 'null'] }
+        PhoneNumber: { type: [string, 'null'] }
+        CallgroupName: { type: [string, 'null'] }
+        ZapOpenNumber: { type: [string, 'null'] }
+        ActionFilterTypeString: { type: [string, 'null'] }
+        timezoneId: { type: [integer, 'null'] }
+      additionalProperties: false
+
+    PropertyLocationId:
+      type: object
+      x-evidence: observed
+      properties:
+        ID: { type: integer, format: int64 }
+      additionalProperties: true
+
+    PortsImagePlaintext:
+      type: object
+      x-evidence: observed
+      required: [TimezoneID, ModulePortID]
+      properties:
+        TimezoneID:
+          type: integer
+          description: >-
+            `PropertyLocation.TimezoneID` of the first unit. The client sends `0` when it has
+            none.
+        ModulePortID:
+          type: array
+          description: Camera port IDs. The name is singular but the value is a list.
+          items: { type: integer, format: int64 }
+      additionalProperties: false
+
+    # ---------------------------------------------------------------- responses
+
+    LoginResponse:
+      type: object
+      x-evidence: observed
+      description: >-
+        Recorded from a live sign-in. The reply also carries the portal's service URLs and
+        feature flags, which this bridge does not use; they are left out here.
+      required: [AuthToken, user]
+      properties:
+        AuthToken: { type: string, description: 'Sent back as `AuthToken: Bearer <token>`.' }
+        AppToken: { type: string }
+        CsrfToken:
+          type: string
+          description: Not in the replies recorded so far; sent back as `x-csrf-token` if present.
+        user: { $ref: '#/components/schemas/LoginUser' }
+      additionalProperties: true
+
+    LoginUser:
+      type: object
+      x-evidence: observed
+      required: [ID, SessionID]
+      properties:
+        ID: { type: integer, format: int64, description: The user ID. }
+        SessionID:
+          type: string
+          description: The session key. Sent back as `AuthKey` and, encrypted, as `Value` / `value`.
+        Name: { type: string }
+        Username: { type: string, description: The sign-in email. }
+        AccountID: { type: integer, format: int64 }
+        TimezoneID: { type: integer }
+        LogDisplayTimezoneID: { type: integer }
+      additionalProperties: true
+
+    Module:
+      type: object
+      x-evidence: observed
+      description: One Watchman unit. Only the fields the client reads are listed.
+      properties:
+        ID: { type: integer, format: int64 }
+        ModuleModemID: { type: integer, format: int64 }
+        DeviceSerialNumber: { type: string, description: MAC-address style., examples: ['00:11:22:33:44:55'] }
+        IsOnline: { type: boolean, description: The client treats a missing value as online. }
+        PropertyLocationID: { type: integer, format: int64 }
+        KitHardwareType:
+          type: object
+          properties:
+            Model: { type: string, examples: [WTM-EVO] }
+        KitModelType: { $ref: '#/components/schemas/Named' }
+        PropertyLocation:
+          type: object
+          properties:
+            Name: { type: string, examples: [Front gate] }
+            TimezoneID: { type: [integer, 'null'] }
+        ModulePorts:
+          type: array
+          items: { $ref: '#/components/schemas/ModulePort' }
+      additionalProperties: true
+
+    ModulePort:
+      type: object
+      x-evidence: observed
+      description: >-
+        One input, output or camera on a unit. An EVO single-family unit has a `Gate` output
+        (`PortType.Code` `O`), a `Sensor` input (`I`) that may report the gate's position (the
+        gate's `ParentID` points at it), and a `Camera` on port `11`.
+      properties:
+        ID: { type: integer, format: int64 }
+        Name: { type: string, examples: [Watchman Gate, Gate Status, Internal Camera] }
+        PortNumber:
+          type: string
+          description: A string, not a number. Can be non-numeric.
+          examples: ['01', '11', 1W]
+        EntryType:
+          description: '`Name` is `Gate`, `Sensor`, `Camera` or `RF/Remote Receiver`.'
+          $ref: '#/components/schemas/Named'
+        PortType:
+          type: object
+          properties:
+            Code:
+              type: string
+              description: '`I` input, `O` output; `W` seen on an RF receiver.'
+              examples: [I, O, W]
+        LastStateTypeID:
+          type: [integer, 'null']
+          description: >-
+            `1` = low state (shown as `RelayLowStatus`), `2` = high state
+            (`RelayHighStatus`). Only 1 and 2 have been seen. The client treats any other value
+            as unknown, so this is not an enum. Can be missing; a real EVO sensor port leaves
+            it out.
+        RelayLowStatus: { type: string, examples: [Gate Closed, Closed] }
+        RelayHighStatus: { type: string, examples: [Gate Open, Open] }
+        ParentID: { type: [integer, 'null'], format: int64 }
+        IsDeleted: { type: boolean, description: The client skips deleted ports. }
+        IsHoldOpenStatus: { type: boolean }
+        IsHolding: { type: boolean }
+        IsSupportLiveStream: { type: boolean }
+      additionalProperties: true
+
+    PortImage:
+      type: object
+      x-evidence: client-assumed
+      properties:
+        ModulePortID: { type: integer, format: int64 }
+        Data:
+          type: object
+          properties:
+            Attachments:
+              type: string
+              description: The name to pass to `getLogImage` as `filename`.
+            ConvertedCreatedOn:
+              type: string
+              description: A local-time display string, not ISO 8601.
+      additionalProperties: true
+
+    GetLogsResponse:
+      type: object
+      x-evidence: observed
+      description: |
+        The casing depends on whether anything matched, so read it with care:
+
+        - entries found: `{"data": [...], "inlineCount": N}`, lowercase;
+        - nothing found: `{"Data": null, "Count": 0, "FabricModuleInfo": null}`, capitalised -
+          also the reply when the request left out `filter` or `propertyLocationIDList`.
+
+        Only the first shape is described, because `data` and `Data` would collide in most
+        generated languages. The second leaves `data` absent, which reads as no entries.
+      properties:
+        data:
+          type: array
+          items: { $ref: '#/components/schemas/LogEntry' }
+        inlineCount: { type: integer, description: Total matches, not just this page. }
+      additionalProperties: true
+
+    LogEntry:
+      type: object
+      x-evidence: observed
+      description: One activity entry. Only the fields this bridge reads are listed.
+      properties:
+        ID: { type: integer, format: int64 }
+        Description:
+          type: string
+          description: >-
+            What happened, in words: `Trigger Gate`, `Gate  Opened (hold for 88 hours)` (two
+            spaces), `Gate Closed`, `Internal Camera Response Picture`, code entries.
+        CreatedOn:
+          type: string
+          description: UTC, ISO 8601 without a zone, e.g. `2026-11-27T19:14:45.757`.
+        ConvertedCreatedOn:
+          type: string
+          description: The same moment in the location's local time, also without a zone.
+        ModuleId: { type: integer, format: int64 }
+        ModulePortId: { type: integer, format: int64, description: The port the entry is about. }
+        ModuleLogTypeID: { type: integer }
+        IsSuccess: { type: boolean }
+        Response: { type: [string, 'null'] }
+        User: { $ref: '#/components/schemas/Named' }
+        AdminUser: { $ref: '#/components/schemas/Named' }
+        Module:
+          type: [object, 'null']
+          properties:
+            ID: { type: integer, format: int64 }
+            PropertyLocation: { $ref: '#/components/schemas/Named' }
+        ModulePort:
+          type: [object, 'null']
+          properties:
+            ID: { type: integer, format: int64 }
+            Name: { type: string }
+            PortNumber: { type: string }
+      additionalProperties: true
+
+    Named:
+      type: object
+      description: Any portal object of which only the display name is read (a user, a location).
+      properties:
+        Name: { type: string }
+      additionalProperties: true
