@@ -18,9 +18,9 @@ class CellGateCryptoTest {
 
   /** Decrypts what {@link CellGateCrypto} produced, to prove the chunk-and-"check" scheme. */
   private static String decrypt(String blob, PrivateKey key) throws Exception {
-    StringBuilder out = new StringBuilder();
-    Cipher cipher = Cipher.getInstance("RSA/ECB/PKCS1Padding");
-    for (String piece : blob.split("check")) {
+    final var out = new StringBuilder();
+    final var cipher = Cipher.getInstance("RSA/ECB/PKCS1Padding");
+    for (final var piece : blob.split("check")) {
       if (piece.isEmpty()) {
         continue;
       }
@@ -33,14 +33,14 @@ class CellGateCryptoTest {
   @Test
   @DisplayName("text is encrypted in 86-char chunks, each followed by 'check', and round-trips")
   void roundTrip() throws Exception {
-    KeyPairGenerator gen = KeyPairGenerator.getInstance("RSA");
+    final var gen = KeyPairGenerator.getInstance("RSA");
     gen.initialize(1024);
-    KeyPair pair = gen.generateKeyPair();
-    CellGateCrypto crypto = new CellGateCrypto(pair.getPublic());
+    final KeyPair pair = gen.generateKeyPair();
+    final var crypto = new CellGateCrypto(pair.getPublic());
 
-    String text = "x".repeat(200); // spans three chunks
-    String blob = crypto.encrypt(text);
-    List<String> pieces = new ArrayList<>(List.of(blob.split("check")));
+    final var text = "x".repeat(200); // spans three chunks
+    final String blob = crypto.encrypt(text);
+    final var pieces = new ArrayList<String>(List.of(blob.split("check")));
     assertEquals(3, pieces.size(), "200 chars at 86 per chunk is three pieces");
     assertEquals(text, decrypt(blob, pair.getPrivate()));
     assertEquals("", crypto.encrypt(""));

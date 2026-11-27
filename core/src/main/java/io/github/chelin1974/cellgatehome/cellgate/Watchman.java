@@ -66,10 +66,10 @@ public record Watchman(
 
   /** Builds the units from {@code getModules}' reply, skipping deleted ports. */
   public static List<Watchman> from(List<Module> modules) {
-    List<Watchman> out = new ArrayList<>();
-    for (Module m : modules == null ? List.<Module>of() : modules) {
-      List<Port> ports = new ArrayList<>();
-      for (ModulePort p : m.modulePorts() == null ? List.<ModulePort>of() : m.modulePorts()) {
+    final var out = new ArrayList<Watchman>();
+    for (final var m : modules == null ? List.<Module>of() : modules) {
+      final var ports = new ArrayList<Port>();
+      for (final var p : m.modulePorts() == null ? List.<ModulePort>of() : m.modulePorts()) {
         if (Boolean.TRUE.equals(p.isDeleted())) {
           continue;
         }
@@ -86,7 +86,7 @@ public record Watchman(
             Boolean.TRUE.equals(p.isHoldOpenStatus()) || Boolean.TRUE.equals(p.isHolding()),
             Boolean.TRUE.equals(p.isSupportLiveStream())));
       }
-      var location = m.propertyLocation();
+      final var location = m.propertyLocation();
       out.add(new Watchman(
           orZero(m.ID()),
           orZero(m.moduleModemID()),
@@ -118,12 +118,12 @@ public record Watchman(
   /** The input that reports this gate's position: its parent, or else the unit's only sensor. */
   public Optional<Port> statusSensorFor(Port gate) {
     if (gate.parentId() != null) {
-      Optional<Port> parent = port(gate.parentId()).filter(Port::isSensor);
+      final Optional<Port> parent = port(gate.parentId()).filter(Port::isSensor);
       if (parent.isPresent()) {
         return parent;
       }
     }
-    List<Port> sensors = ports.stream().filter(Port::isSensor).toList();
+    final List<Port> sensors = ports.stream().filter(Port::isSensor).toList();
     return sensors.size() == 1 ? Optional.of(sensors.get(0)) : Optional.empty();
   }
 

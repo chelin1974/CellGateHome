@@ -71,11 +71,11 @@ public final class GateActivityWatcher {
     if (entries == null) {
       return 0;
     }
-    List<LogEntry> list = new ArrayList<>(entries);
+    final var list = new ArrayList<LogEntry>(entries);
     int opened = 0;
     // Oldest first, so a hold followed by its release ends released.
     for (int i = list.size() - 1; i >= 0; i--) {
-      LogEntry entry = list.get(i);
+      final LogEntry entry = list.get(i);
       if (entry.ID() != null && !seen.add(entry.ID())) {
         continue;
       }
@@ -88,17 +88,17 @@ public final class GateActivityWatcher {
   }
 
   private boolean apply(LogEntry entry) {
-    GateAccessory gate = entry.modulePortId() == null ? null : gatesByPort.get(entry.modulePortId());
+    final GateAccessory gate = entry.modulePortId() == null ? null : gatesByPort.get(entry.modulePortId());
     if (gate == null || Boolean.FALSE.equals(entry.isSuccess())) {
       return false;
     }
-    Instant at = loggedAt(entry);
-    String description = entry.description();
+    final Instant at = loggedAt(entry);
+    final String description = entry.description();
     if (at == null || description == null || description.isBlank()) {
       return false;
     }
-    String d = description.toLowerCase(Locale.ROOT);
-    Matcher hold = HOLD.matcher(d);
+    final String d = description.toLowerCase(Locale.ROOT);
+    final Matcher hold = HOLD.matcher(d);
     if (hold.find()) {
       log.debug("activity log: gate held open at {} for {} hours", at, hold.group(1));
       return gate.assumeOpen(at, at.plus(Duration.ofHours(Long.parseLong(hold.group(1)))));
@@ -114,7 +114,7 @@ public final class GateActivityWatcher {
 
   /** {@code CreatedOn} is UTC without a zone ({@code ConvertedCreatedOn} is local time). */
   static Instant loggedAt(LogEntry entry) {
-    String created = entry.createdOn();
+    final String created = entry.createdOn();
     if (created == null || created.isBlank()) {
       return null;
     }
@@ -126,7 +126,7 @@ public final class GateActivityWatcher {
   }
 
   private void trimSeen() {
-    var it = seen.iterator();
+    final var it = seen.iterator();
     while (seen.size() > MAX_SEEN && it.hasNext()) {
       it.next();
       it.remove();

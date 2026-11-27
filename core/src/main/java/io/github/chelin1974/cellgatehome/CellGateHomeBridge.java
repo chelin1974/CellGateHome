@@ -60,7 +60,7 @@ public final class CellGateHomeBridge implements AutoCloseable {
   private final CellGateClient client;
   private final ScheduledExecutorService scheduler =
       Executors.newSingleThreadScheduledExecutor(r -> {
-        Thread t = new Thread(r, "cellgate-home-poll");
+        final var t = new Thread(r, "cellgate-home-poll");
         t.setDaemon(true);
         return t;
       });
@@ -128,14 +128,14 @@ public final class CellGateHomeBridge implements AutoCloseable {
     }
     client.signIn();
     units = client.devices();
-    List<GateEntry> gates = discoverGates(units);
+    final List<GateEntry> gates = discoverGates(units);
     if (gates.isEmpty()) {
       log.warn("the CellGate account has no gates this bridge can control; nothing to publish.");
       return;
     }
 
-    FileAuthInfo authInfo = FileAuthInfo.loadOrCreate(config.storagePath());
-    InetAddress address = NetworkAddresses.resolve(config.bindAddress());
+    final var authInfo = FileAuthInfo.loadOrCreate(config.storagePath());
+    final InetAddress address = NetworkAddresses.resolve(config.bindAddress());
     if (address.isLoopbackAddress()) {
       log.warn("advertising HomeKit on {}, a loopback address your iPhone cannot reach."
           + " Set \"bindAddress\" to this machine's LAN IP.", address.getHostAddress());
@@ -150,16 +150,16 @@ public final class CellGateHomeBridge implements AutoCloseable {
     bridge = server.createBridge(authInfo, config.bridgeName(), HomekitAccessoryCategories.BRIDGES,
         "CellGate", "CellGate HomeKit Bridge", "cellgate-home-bridge", "1.0.0", "1.0.0");
 
-    AccessoryIds ids = AccessoryIds.load(accessoryIdsFile());
-    List<HomekitAccessory> accessories = new ArrayList<>();
-    List<DashboardModel.Gate> dashboardGates = new ArrayList<>();
-    List<DoorbellWatcher.Bell> bells = new ArrayList<>();
-    List<String> takenNames = new ArrayList<>();
+    final var ids = AccessoryIds.load(accessoryIdsFile());
+    final var accessories = new ArrayList<HomekitAccessory>();
+    final var dashboardGates = new ArrayList<DashboardModel.Gate>();
+    final var bells = new ArrayList<DoorbellWatcher.Bell>();
+    final var takenNames = new ArrayList<String>();
 
-    for (GateEntry entry : gates) {
-      String display = HomeKitNames.unique(HomeKitNames.clean(entry.name(), "Gate"), takenNames);
+    for (final var entry : gates) {
+      final String display = HomeKitNames.unique(HomeKitNames.clean(entry.name(), "Gate"), takenNames);
       takenNames.add(display);
-      GateAccessory accessory = new GateAccessory(
+      final var accessory = new GateAccessory(
           ids.idFor("gate:" + entry.unit().id() + ":" + entry.gate().id()),
           display,
           entry.unit().serial(),
@@ -177,9 +177,9 @@ public final class CellGateHomeBridge implements AutoCloseable {
       dashboardGates.add(new Gate("gate-" + entry.gate().id(), display, entry.unit().location(), accessory));
 
       if (config.doorbell()) {
-        String bellName = HomeKitNames.unique(display + " Doorbell", takenNames);
+        final String bellName = HomeKitNames.unique(display + " Doorbell", takenNames);
         takenNames.add(bellName);
-        GateDoorbell doorbell = new GateDoorbell(
+        final var doorbell = new GateDoorbell(
             ids.idFor("doorbell:" + entry.unit().id() + ":" + entry.gate().id()),
             bellName,
             entry.unit().serial() == null ? null : entry.unit().serial() + "-doorbell",
@@ -193,7 +193,7 @@ public final class CellGateHomeBridge implements AutoCloseable {
       doorbellWatcher = new DoorbellWatcher(bells, config.doorbellRingEvents());
     }
     if (!config.assumeOpen().isZero()) {
-      Map<Long, GateAccessory> byPort = new HashMap<>();
+      final var byPort = new HashMap<Long, GateAccessory>();
       gateHandles.forEach(h -> byPort.put(h.gatePortId(), h.accessory()));
       gateActivityWatcher = new GateActivityWatcher(byPort, config.assumeOpen());
     }
@@ -268,8 +268,8 @@ public final class CellGateHomeBridge implements AutoCloseable {
       log.warn("could not read the gate state from CellGate: {}", e.getMessage());
       return;
     }
-    for (GateHandle h : gateHandles) {
-      Boolean measured = openStateFor(h);
+    for (final var h : gateHandles) {
+      final Boolean measured = openStateFor(h);
       noteFirstMeasuredReading(h, measured);
       h.accessory().updateOpen(measured);
     }
@@ -294,7 +294,7 @@ public final class CellGateHomeBridge implements AutoCloseable {
    * button does not multiply the requests to CellGate.
    */
   private void watchAfterOpen() {
-    Duration window = config.watchAfterOpen();
+    final Duration window = config.watchAfterOpen();
     if (window.isZero()) {
       return;
     }
@@ -358,11 +358,11 @@ public final class CellGateHomeBridge implements AutoCloseable {
    * isolated point, which most panels cannot draw.
    */
   private void pushMetricsSoon() {
-    OtlpExporter active = exporter;
+    final OtlpExporter active = exporter;
     if (active == null) {
       return;
     }
-    for (int seconds : new int[] {2, 15}) {
+    for (final var seconds : new int[] {2, 15}) {
       scheduler.schedule(active::push, seconds, TimeUnit.SECONDS);
     }
   }
@@ -375,7 +375,7 @@ public final class CellGateHomeBridge implements AutoCloseable {
     if (doorbellWatcher == null && gateActivityWatcher == null) {
       return;
     }
-    List<LogEntry> entries;
+    final List<LogEntry> entries;
     try {
       entries = client.activity(ACTIVITY_COUNT);
     } catch (RuntimeException e) {
@@ -383,7 +383,7 @@ public final class CellGateHomeBridge implements AutoCloseable {
       return;
     }
     if (doorbellWatcher != null) {
-      int fired = doorbellWatcher.onActivity(entries);
+      final int fired = doorbellWatcher.onActivity(entries);
       if (fired > 0) {
         log.debug("rang the doorbell {} time(s) from new gate activity", fired);
       }
@@ -424,7 +424,7 @@ public final class CellGateHomeBridge implements AutoCloseable {
    * @return true open, false closed, or null when the sensor reports nothing usable
    */
   private Boolean openStateFor(GateHandle h) {
-    for (Watchman unit : units) {
+    for (final var unit : units) {
       if (unit.id() == h.unitId()) {
         return openStateFor(unit, h.statusPortId());
       }
@@ -455,7 +455,7 @@ public final class CellGateHomeBridge implements AutoCloseable {
     if (statusText == null) {
       return null;
     }
-    String s = statusText.toLowerCase(java.util.Locale.ROOT);
+    final String s = statusText.toLowerCase(java.util.Locale.ROOT);
     if (s.contains("open")) {
       return true;
     }
@@ -467,14 +467,14 @@ public final class CellGateHomeBridge implements AutoCloseable {
 
   /** Finds every gate on the account, with the status sensor that reports its position. */
   static List<GateEntry> discoverGates(List<Watchman> units) {
-    List<GateEntry> gates = new ArrayList<>();
-    for (Watchman unit : units) {
+    final var gates = new ArrayList<GateEntry>();
+    for (final var unit : units) {
       if (!unit.isEvo()) {
         log.warn("unit \"{}\" is a {}, which this bridge hasn't been checked against; trying anyway.",
             unit.location(), unit.hardwareModel());
       }
-      for (Watchman.Port gate : unit.gates()) {
-        Long statusId = unit.statusSensorFor(gate).map(Watchman.Port::id).orElse(null);
+      for (final var gate : unit.gates()) {
+        final Long statusId = unit.statusSensorFor(gate).map(Watchman.Port::id).orElse(null);
         gates.add(new GateEntry(unit, gate, statusId));
       }
     }

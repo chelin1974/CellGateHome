@@ -122,7 +122,7 @@ public final class CellGateClient {
     this.email = email;
     this.password = password;
     this.crypto = crypto;
-    ApiClient accountKit = apiClient(hosts.get(ACCOUNTKIT), requestTimeout);
+    final ApiClient accountKit = apiClient(hosts.get(ACCOUNTKIT), requestTimeout);
     this.mapper = accountKit.getObjectMapper();
     this.sessionApi = new SessionApi(accountKit);
     this.devicesApi = new DevicesApi(accountKit);
@@ -131,8 +131,8 @@ public final class CellGateClient {
   }
 
   private static ApiClient apiClient(String baseUri, Duration requestTimeout) {
-    URI uri = URI.create(baseUri);
-    ApiClient client = new ApiClient();
+    final var uri = URI.create(baseUri);
+    final var client = new ApiClient();
     client.setHttpClientBuilder(HttpClient.newBuilder());
     client.setConnectTimeout(Duration.ofSeconds(10));
     client.setReadTimeout(requestTimeout);
@@ -147,7 +147,7 @@ public final class CellGateClient {
 
   /** Signs in and returns who the account belongs to. Throws on a bad email or password. */
   public synchronized Session signIn() {
-    LoginResponse reply;
+    final LoginResponse reply;
     try {
       // The one call without a session: no key, so Value is empty, and the portal sends the
       // literal "Bearer null" / "null" for the auth headers.
@@ -164,7 +164,7 @@ public final class CellGateClient {
           reply == null || reply.user() == null ? "missing" : "present");
       throw new CellGateException("the CellGate sign-in was refused; check the email and password.");
     }
-    var user = reply.user();
+    final var user = reply.user();
     session = new Session(
         reply.authToken(),
         Objects.requireNonNullElse(user.sessionID(), ""),
@@ -178,7 +178,7 @@ public final class CellGateClient {
   }
 
   private Session session() {
-    Session s = session;
+    final Session s = session;
     if (s == null || Duration.between(s.since(), Instant.now()).compareTo(SESSION_LIFE) >= 0) {
       return signIn();
     }
@@ -228,11 +228,11 @@ public final class CellGateClient {
    */
   public List<LogEntry> activity(int count) {
     return call("getLogs", s -> {
-      var plaintext = new GetLogsPlaintext(1, count, s.accountId(), s.username(),
+      final var plaintext = new GetLogsPlaintext(1, count, s.accountId(), s.username(),
           List.of("CreatedOn DESC"), new LogFilter(null, null, null, null, null, null, null,
               null, null, null, null, null, null, null),
           propertyLocationIds(s), null, null);
-      var reply = activityApi.getLogs(
+      final var reply = activityApi.getLogs(
           encryptedBody(plaintext, s.key()), RESPONSE_TYPE, csrf(s), headers(s));
       return reply == null || reply.data() == null ? List.<LogEntry>of() : reply.data();
     });
@@ -240,14 +240,14 @@ public final class CellGateClient {
 
   /** The property locations the user can see, which the activity log is filtered by. */
   private List<Long> propertyLocationIds(Session s) throws ApiException {
-    var cached = locationIds;
+    final var cached = locationIds;
     if (cached != null && cached.getKey() == s) {
       return cached.getValue();
     }
     List<PropertyLocationId> reply = devicesApi.getPropertyLocationIds(
         crypto.encrypt("AccountID=0&UserID=" + s.userId()), Map.of(), encryptedKey(s),
         RESPONSE_TYPE, csrf(s), headers(s));
-    List<Long> ids = (reply == null ? List.<PropertyLocationId>of() : reply).stream()
+    final List<Long> ids = (reply == null ? List.<PropertyLocationId>of() : reply).stream()
         .map(PropertyLocationId::ID)
         .filter(id -> id != null && id != 0)
         .toList();
@@ -258,8 +258,8 @@ public final class CellGateClient {
   /** The latest picture on each camera port, as the dashboard shows them; empty, never null. */
   public List<PortImage> cameraImages(List<Long> cameraPortIds, Integer timezoneId) {
     return call("getPortsImage", s -> {
-      var plaintext = new PortsImagePlaintext(timezoneId == null ? 0 : timezoneId, cameraPortIds);
-      var reply = devicesApi.getPortsImage(
+      final var plaintext = new PortsImagePlaintext(timezoneId == null ? 0 : timezoneId, cameraPortIds);
+      final var reply = devicesApi.getPortsImage(
           encryptedBody(plaintext, s.key()), RESPONSE_TYPE, csrf(s), headers(s));
       return reply == null ? List.<PortImage>of() : reply;
     });
@@ -271,7 +271,7 @@ public final class CellGateClient {
       return call("getLogImage", s -> {
         // The raw name goes into the plaintext query; the whole query is encrypted, so no
         // escaping here.
-        File file = activityApi.getLogImage(crypto.encrypt("filename=" + attachment),
+        final File file = activityApi.getLogImage(crypto.encrypt("filename=" + attachment),
             encryptedKey(s), RESPONSE_TYPE, csrf(s), headers(s));
         try {
           return Optional.of(Files.readAllBytes(file.toPath()));
@@ -312,7 +312,7 @@ public final class CellGateClient {
   }
 
   private CellGateException failure(String operation, ApiException e) {
-    int code = e.getCode();
+    final int code = e.getCode();
     if (code == 401) {
       session = null;
       return new CellGateException("CellGate ended the session (HTTP 401)");
@@ -324,7 +324,7 @@ public final class CellGateClient {
       return new CellGateException("CellGate answered HTTP " + code + " for " + operation);
     }
     // Code 0: the generated client wraps transport and parsing failures with no status.
-    Throwable cause = e.getCause() == null ? e : e.getCause();
+    final Throwable cause = e.getCause() == null ? e : e.getCause();
     if (cause instanceof InterruptedException) {
       Thread.currentThread().interrupt();
       return new CellGateException("interrupted", cause);
@@ -340,7 +340,7 @@ public final class CellGateClient {
    * and the session key encrypted ({@code ""} before sign-in).
    */
   private EncryptedBody encryptedBody(Object plaintext, String sessionKey) {
-    String json;
+    final String json;
     try {
       json = plaintextMapper().writeValueAsString(plaintext);
     } catch (JacksonException e) {

@@ -36,8 +36,8 @@ public final class DoorbellWatcher {
 
   public DoorbellWatcher(List<Bell> bells, List<String> ringPhrases) {
     this.bells = List.copyOf(bells);
-    List<String> lower = new ArrayList<>();
-    for (String p : ringPhrases) {
+    final var lower = new ArrayList<String>();
+    for (final var p : ringPhrases) {
       lower.add(p.toLowerCase(Locale.ROOT));
     }
     this.ringPhrases = List.copyOf(lower);
@@ -52,11 +52,11 @@ public final class DoorbellWatcher {
       return 0;
     }
     // Walk oldest-first so, when several visits arrived between polls, they ring in order.
-    List<LogEntry> list = new ArrayList<>(entries);
+    final var list = new ArrayList<LogEntry>(entries);
     int fired = 0;
     for (int i = list.size() - 1; i >= 0; i--) {
-      LogEntry entry = list.get(i);
-      String signature = signature(entry);
+      final LogEntry entry = list.get(i);
+      final String signature = signature(entry);
       if (!seen.add(signature)) {
         continue; // already handled
       }
@@ -73,7 +73,7 @@ public final class DoorbellWatcher {
   }
 
   private int ring(LogEntry entry) {
-    GateDoorbell target = pick(location(entry));
+    final GateDoorbell target = pick(location(entry));
     if (target == null) {
       return 0;
     }
@@ -84,7 +84,7 @@ public final class DoorbellWatcher {
 
   /** The unit's location name ("Front gate"), from the entry's module. */
   private static String location(LogEntry entry) {
-    var module = entry.module();
+    final var module = entry.module();
     return module == null || module.propertyLocation() == null
         ? null : module.propertyLocation().name();
   }
@@ -95,8 +95,8 @@ public final class DoorbellWatcher {
       return bells.get(0).doorbell();
     }
     if (location != null && !location.isBlank()) {
-      String loc = location.toLowerCase(Locale.ROOT);
-      for (Bell b : bells) {
+      final String loc = location.toLowerCase(Locale.ROOT);
+      for (final var b : bells) {
         if (b.location() != null && !b.location().isBlank()
             && loc.contains(b.location().toLowerCase(Locale.ROOT))) {
           return b.doorbell();
@@ -107,12 +107,12 @@ public final class DoorbellWatcher {
   }
 
   private boolean isRing(LogEntry entry) {
-    String description = entry.description();
+    final String description = entry.description();
     if (description == null) {
       return false;
     }
-    String d = description.toLowerCase(Locale.ROOT);
-    for (String phrase : ringPhrases) {
+    final String d = description.toLowerCase(Locale.ROOT);
+    for (final var phrase : ringPhrases) {
       if (d.contains(phrase)) {
         return true;
       }
@@ -125,7 +125,7 @@ public final class DoorbellWatcher {
     if (entry.ID() != null) {
       return "id:" + entry.ID();
     }
-    String who = entry.user() != null ? entry.user().name()
+    final String who = entry.user() != null ? entry.user().name()
         : entry.adminUser() != null ? entry.adminUser().name() : null;
     return entry.description() + "|" + entry.createdOn() + "|" + who;
   }
@@ -134,7 +134,7 @@ public final class DoorbellWatcher {
     if (seen.size() <= MAX_SEEN) {
       return;
     }
-    var it = seen.iterator();
+    final var it = seen.iterator();
     while (seen.size() > MAX_SEEN && it.hasNext()) {
       it.next();
       it.remove();

@@ -46,9 +46,9 @@ class DoorbellWatcherTest {
    * Built as JSON and read the way the generated client reads it.
    */
   private List<LogEntry> logOf(String... descriptions) {
-    ArrayNode arr = MAPPER.createArrayNode();
-    for (String description : descriptions) {
-      ObjectNode e = MAPPER.createObjectNode();
+    final ArrayNode arr = MAPPER.createArrayNode();
+    for (final var description : descriptions) {
+      final ObjectNode e = MAPPER.createObjectNode();
       e.put("Description", description);
       e.put("CreatedOn", "2026-10-23T13:%02d:00".formatted(minute++));
       e.putObject("User").put("Name", "Guest");
@@ -60,16 +60,16 @@ class DoorbellWatcherTest {
 
   @Test
   void firstBatchOnlyPrimesAndDoesNotRing() {
-    DoorbellWatcher w = watcher(doorbell());
+    final DoorbellWatcher w = watcher(doorbell());
     assertEquals(0, w.onActivity(logOf("Internal Camera Response Picture", "Trigger Gate")));
   }
 
   @Test
   void aNewCameraPictureRingsOnce() {
-    GateDoorbell bell = doorbell();
-    DoorbellWatcher w = watcher(bell);
+    final GateDoorbell bell = doorbell();
+    final DoorbellWatcher w = watcher(bell);
     w.onActivity(logOf("Trigger Gate")); // prime with no ring event
-    int fired = w.onActivity(
+    final int fired = w.onActivity(
         logOf("Internal Camera Response Picture", "Trigger Gate", "Checking non-local Code: 1122"));
     assertEquals(1, fired);
     assertEquals(ProgrammableSwitchEnum.SINGLE_PRESS, bell.getSwitchEvent().join());
@@ -77,25 +77,25 @@ class DoorbellWatcherTest {
 
   @Test
   void theSameEntryIsNeverRungTwice() {
-    DoorbellWatcher w = watcher(doorbell());
+    final DoorbellWatcher w = watcher(doorbell());
     w.onActivity(logOf("Trigger Gate"));
-    List<LogEntry> visit = logOf("Internal Camera Response Picture", "Trigger Gate");
+    final List<LogEntry> visit = logOf("Internal Camera Response Picture", "Trigger Gate");
     assertEquals(1, w.onActivity(visit));
     assertEquals(0, w.onActivity(visit)); // same page polled again
   }
 
   @Test
   void ordinaryGateTrafficDoesNotRing() {
-    DoorbellWatcher w = watcher(doorbell());
+    final DoorbellWatcher w = watcher(doorbell());
     w.onActivity(logOf("Trigger Gate"));
     assertEquals(0, w.onActivity(logOf("Gate Opened (hold for 1 hour)", "Gate Closed", "Trigger Gate")));
   }
 
   @Test
   void twoNewVisitsInOnePollRingTwice() {
-    DoorbellWatcher w = watcher(doorbell());
+    final DoorbellWatcher w = watcher(doorbell());
     w.onActivity(logOf("Trigger Gate"));
-    int fired = w.onActivity(logOf(
+    final int fired = w.onActivity(logOf(
         "Internal Camera Response Picture", "Trigger Gate",
         "Internal Camera Response Picture", "Trigger Gate"));
     assertEquals(2, fired);

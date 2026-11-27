@@ -58,14 +58,14 @@ class CellGateClientTest {
 
   @BeforeEach
   void start() throws Exception {
-    KeyPairGenerator gen = KeyPairGenerator.getInstance("RSA");
+    final var gen = KeyPairGenerator.getInstance("RSA");
     gen.initialize(1024);
     keys = gen.generateKeyPair();
 
     server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
     server.createContext("/", this::handle);
     server.start();
-    String local = "http://127.0.0.1:" + server.getAddress().getPort();
+    final var local = "http://127.0.0.1:" + server.getAddress().getPort();
     client = new CellGateClient("owner@example.com", "pw", new CellGateCrypto(keys.getPublic()),
         Duration.ofSeconds(5), Map.of(
             CellGateClient.ACCOUNTKIT, local,
@@ -82,27 +82,27 @@ class CellGateClientTest {
   }
 
   private void handle(HttpExchange exchange) throws IOException {
-    String path = exchange.getRequestURI().getPath();
-    String raw = new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
-    Map<String, String> query = new HashMap<>();
-    String q = exchange.getRequestURI().getRawQuery();
+    final String path = exchange.getRequestURI().getPath();
+    final var raw = new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
+    final var query = new HashMap<String, String>();
+    final String q = exchange.getRequestURI().getRawQuery();
     if (q != null) {
-      for (String pair : q.split("&")) {
-        int eq = pair.indexOf('=');
+      for (final var pair : q.split("&")) {
+        final int eq = pair.indexOf('=');
         query.put(pair.substring(0, eq),
             decrypt(URLDecoder.decode(pair.substring(eq + 1), StandardCharsets.UTF_8)));
       }
     }
-    JsonNode body = raw.isEmpty() ? null : MAPPER.readTree(raw);
-    Map<String, String> headers = new HashMap<>();
+    final JsonNode body = raw.isEmpty() ? null : MAPPER.readTree(raw);
+    final var headers = new HashMap<String, String>();
     exchange.getRequestHeaders().forEach((k, v) -> headers.put(k.toLowerCase(), v.get(0)));
     received.put(path, new Received(exchange.getRequestMethod(), query, body, raw, headers));
     if (path.endsWith("/userlogin")) {
       logins.incrementAndGet();
     }
 
-    Object[] reply = replies.getOrDefault(path, new Object[] {200, ""});
-    byte[] bytes = reply[1] instanceof byte[] b ? b : ((String) reply[1]).getBytes(StandardCharsets.UTF_8);
+    final Object[] reply = replies.getOrDefault(path, new Object[] {200, ""});
+    final byte[] bytes = reply[1] instanceof byte[] b ? b : ((String) reply[1]).getBytes(StandardCharsets.UTF_8);
     exchange.getResponseHeaders().add("Content-Type",
         reply[1] instanceof byte[] ? "application/octet-stream" : "application/json");
     exchange.sendResponseHeaders((int) reply[0], bytes.length == 0 ? -1 : bytes.length);
@@ -114,10 +114,10 @@ class CellGateClientTest {
 
   private String decrypt(String blob) {
     try {
-      PrivateKey key = keys.getPrivate();
-      Cipher cipher = Cipher.getInstance("RSA/ECB/PKCS1Padding");
-      StringBuilder out = new StringBuilder();
-      for (String piece : blob.split("check")) {
+      final PrivateKey key = keys.getPrivate();
+      final var cipher = Cipher.getInstance("RSA/ECB/PKCS1Padding");
+      final var out = new StringBuilder();
+      for (final var piece : blob.split("check")) {
         if (!piece.isEmpty()) {
           cipher.init(Cipher.DECRYPT_MODE, key);
           out.append(new String(cipher.doFinal(Base64.getDecoder().decode(piece)), StandardCharsets.UTF_8));
@@ -135,10 +135,10 @@ class CellGateClientTest {
 
   @Test
   void signInSendsTheCredentialsEncryptedWithAnEmptyValue() {
-    var session = client.signIn();
+    final var session = client.signIn();
 
-    Received login = received.get("/api/AccountKit/userlogin");
-    JsonNode data = decryptedData("/api/AccountKit/userlogin");
+    final Received login = received.get("/api/AccountKit/userlogin");
+    final JsonNode data = decryptedData("/api/AccountKit/userlogin");
     assertEquals("owner@example.com", data.path("username").asString());
     assertEquals("pw", data.path("password").asString());
     assertEquals("", login.body().path("Value").asString());
@@ -154,9 +154,9 @@ class CellGateClientTest {
 
   @Test
   void aGetHasItsWholeQueryEncryptedAndCarriesTheSession() {
-    List<Watchman> units = client.devices();
+    final List<Watchman> units = client.devices();
 
-    Received get = received.get("/api/Dashboard/getModules");
+    final Received get = received.get("/api/Dashboard/getModules");
     assertEquals("GET", get.method());
     assertEquals(Map.of("request", "UserId=7&AccountID=0", "value", "key-1"), get.query());
     assertEquals("Bearer tok-1", get.headers().get("authtoken"));
@@ -171,10 +171,10 @@ class CellGateClientTest {
 
   @Test
   void triggeringAGateSendsTheActuationEncryptedAndAcceptsAnEmptyReply() {
-    Watchman unit = client.devices().get(0);
+    final Watchman unit = client.devices().get(0);
     client.triggerGate(unit, unit.gates().get(0));
 
-    JsonNode data = decryptedData("/api/EVOhttp/EVOWTMMomentaryActuationRequest");
+    final JsonNode data = decryptedData("/api/EVOhttp/EVOWTMMomentaryActuationRequest");
     assertEquals(15841, data.path("ModuleModemId").asLong());
     assertEquals(78847, data.path("ModulePortId").asLong());
     assertEquals("Gate", data.path("ModuleType").asString());
@@ -191,14 +191,14 @@ class CellGateClientTest {
         {"data":[{"ID":179531924,"Description":"Trigger Gate","CreatedOn":"2026-11-27T19:14:45.757",
           "ModulePortId":78847,"IsSuccess":true,"User":{"Name":"Guest"}}],"inlineCount":1}"""});
 
-    var entries = client.activity(20);
+    final var entries = client.activity(20);
 
-    Received locations = received.get("/api/useraccesscode/GetPropertyLocationIDs");
+    final Received locations = received.get("/api/useraccesscode/GetPropertyLocationIDs");
     assertEquals("POST", locations.method());
     assertEquals(Map.of("request", "AccountID=0&UserID=7", "value", "key-1"), locations.query());
     assertEquals("{}", locations.rawBody(), "this POST's body goes unencrypted");
 
-    JsonNode logs = decryptedData("/api/Log/GetLogs");
+    final JsonNode logs = decryptedData("/api/Log/GetLogs");
     assertEquals(List.of(18866L), MAPPER.convertValue(logs.path("propertyLocationIDList"),
         MAPPER.getTypeFactory().constructCollectionType(List.class, Long.class)));
     assertTrue(logs.path("filter").isObject());
@@ -223,7 +223,7 @@ class CellGateClientTest {
 
   @Test
   void anImageComesBackAsBytesAndAMissingOneAsEmpty() {
-    byte[] jpeg = {(byte) 0xFF, (byte) 0xD8, 1, 2, 3};
+    final byte[] jpeg = {(byte) 0xFF, (byte) 0xD8, 1, 2, 3};
     replies.put("/api/Portal/LogImageUpload", new Object[] {200, jpeg});
     assertArrayEquals(jpeg, client.image("pic-1.jpg").orElseThrow());
     assertEquals("filename=pic-1.jpg", received.get("/api/Portal/LogImageUpload").query().get("request"));
@@ -238,7 +238,7 @@ class CellGateClientTest {
     assertEquals(1, logins.get());
 
     replies.put("/api/Dashboard/getModules", new Object[] {401, ""});
-    var e = assertThrows(CellGateException.class, client::devices);
+    final var e = assertThrows(CellGateException.class, client::devices);
     assertTrue(e.getMessage().contains("401"));
 
     replies.put("/api/Dashboard/getModules", new Object[] {200, MODULES_REPLY});
@@ -249,14 +249,14 @@ class CellGateClientTest {
   @Test
   void anotherErrorNamesTheStatusAndTheOperation() {
     replies.put("/api/Dashboard/getModules", new Object[] {500, ""});
-    var e = assertThrows(CellGateException.class, client::devices);
+    final var e = assertThrows(CellGateException.class, client::devices);
     assertEquals("CellGate answered HTTP 500 for getModules", e.getMessage());
   }
 
   @Test
   void aSignInWithoutATokenIsRefused() {
     replies.put("/api/AccountKit/userlogin", new Object[] {200, "{\"Message\":\"Invalid\"}"});
-    var e = assertThrows(CellGateException.class, client::signIn);
+    final var e = assertThrows(CellGateException.class, client::signIn);
     assertTrue(e.getMessage().contains("refused"));
   }
 }

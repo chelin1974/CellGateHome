@@ -50,7 +50,7 @@ class GateActivityWatcherTest {
 
   /** Prepends an entry, so the page stays newest first like the real log. */
   private void logged(Duration ago, long portId, String description) {
-    ObjectNode e = MAPPER.createObjectNode();
+    final ObjectNode e = MAPPER.createObjectNode();
     e.put("ID", nextId++);
     e.put("ModulePortId", portId);
     e.put("Description", description);

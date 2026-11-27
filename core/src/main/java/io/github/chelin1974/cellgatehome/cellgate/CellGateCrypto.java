@@ -53,11 +53,11 @@ public final class CellGateCrypto {
 
   /** Encrypts text the way the portal does. Empty text encrypts to an empty string. */
   public String encrypt(String text) {
-    StringBuilder out = new StringBuilder();
+    final var out = new StringBuilder();
     try {
-      Cipher cipher = Cipher.getInstance("RSA/ECB/PKCS1Padding");
+      final var cipher = Cipher.getInstance("RSA/ECB/PKCS1Padding");
       for (int i = 0; i < text.length(); i += CHUNK) {
-        String piece = text.substring(i, Math.min(text.length(), i + CHUNK));
+        final String piece = text.substring(i, Math.min(text.length(), i + CHUNK));
         cipher.init(Cipher.ENCRYPT_MODE, key);
         out.append(Base64.getEncoder().encodeToString(cipher.doFinal(piece.getBytes(StandardCharsets.UTF_8))));
         out.append("check");

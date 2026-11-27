@@ -43,20 +43,20 @@ public final class DashboardModel {
 
   /** The gates and their state, shaped for the page. */
   public Map<String, Object> state(boolean switchingEnabled) {
-    List<Object> list = new ArrayList<>();
-    for (Gate g : gates) {
-      Map<String, Object> m = new LinkedHashMap<>();
+    final var list = new ArrayList<Object>();
+    for (final var g : gates) {
+      final var m = new LinkedHashMap<String, Object>();
       m.put("id", g.id());
       m.put("name", g.name());
       m.put("location", g.location());
-      Boolean open = g.accessory().isOpen();
+      final Boolean open = g.accessory().isOpen();
       m.put("state", !g.accessory().hasReading() ? "unknown" : open ? "open" : "closed");
       // Whether that came from the gate's sensor or from the trigger we sent, so the page can
       // say which instead of presenting an assumption as a reading.
       m.put("assumed", g.accessory().isAssumed());
       list.add(m);
     }
-    Map<String, Object> state = new LinkedHashMap<>();
+    final var state = new LinkedHashMap<String, Object>();
     state.put("time", System.currentTimeMillis());
     state.put("switching", switchingEnabled);
     state.put("gates", list);
@@ -65,7 +65,7 @@ public final class DashboardModel {
 
   /** Opens a gate through its accessory. */
   public OpenResult open(String gateId) {
-    for (Gate g : gates) {
+    for (final var g : gates) {
       if (g.id().equals(gateId)) {
         try {
           g.accessory().open();
@@ -80,7 +80,7 @@ public final class DashboardModel {
 
   /** Asks every camera to take a fresh picture. */
   public void takePictures() {
-    for (Watchman unit : units) {
+    for (final var unit : units) {
       unit.camera().ifPresent(cam -> client.takePicture(unit, cam));
     }
   }
@@ -92,10 +92,10 @@ public final class DashboardModel {
 
   /** The latest picture for each camera: {@code {portId, name, attachment, takenAt}}. */
   public List<Map<String, Object>> cameras() {
-    List<Long> cameraPorts = new ArrayList<>();
-    Map<Long, String> names = new LinkedHashMap<>();
+    final var cameraPorts = new ArrayList<Long>();
+    final var names = new LinkedHashMap<Long, String>();
     Integer timezone = null;
-    for (Watchman unit : units) {
+    for (final var unit : units) {
       if (timezone == null) {
         timezone = unit.timezoneId();
       }
@@ -107,11 +107,11 @@ public final class DashboardModel {
     if (cameraPorts.isEmpty()) {
       return List.of();
     }
-    List<Map<String, Object>> out = new ArrayList<>();
-    for (PortImage entry : client.cameraImages(cameraPorts, timezone)) {
-      long portId = entry.modulePortID() == null ? 0L : entry.modulePortID();
-      var data = entry.data();
-      Map<String, Object> m = new LinkedHashMap<>();
+    final var out = new ArrayList<Map<String, Object>>();
+    for (final var entry : client.cameraImages(cameraPorts, timezone)) {
+      final long portId = entry.modulePortID() == null ? 0L : entry.modulePortID();
+      final var data = entry.data();
+      final var m = new LinkedHashMap<String, Object>();
       m.put("portId", portId);
       m.put("name", names.getOrDefault(portId, "Camera"));
       m.put("attachment", data == null ? null : data.attachments());
@@ -132,14 +132,14 @@ public final class DashboardModel {
    * first one. This is the most recent still CellGate holds, not a fresh capture.
    */
   public Optional<byte[]> latestSnapshot(Long portId) {
-    List<Map<String, Object>> cams = cameras();
+    final List<Map<String, Object>> cams = cameras();
     if (cams.isEmpty()) {
       return Optional.empty();
     }
     Map<String, Object> chosen = null;
     if (portId != null) {
-      for (Map<String, Object> cam : cams) {
-        Object id = cam.get("portId");
+      for (final var cam : cams) {
+        final Object id = cam.get("portId");
         if (id instanceof Number n && n.longValue() == portId) {
           chosen = cam;
           break;
@@ -149,7 +149,7 @@ public final class DashboardModel {
     if (chosen == null) {
       chosen = cams.get(0);
     }
-    Object attachment = chosen.get("attachment");
+    final Object attachment = chosen.get("attachment");
     return attachment == null ? Optional.empty() : image(attachment.toString());
   }
 }
